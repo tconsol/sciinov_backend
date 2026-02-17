@@ -21,14 +21,14 @@ public class UserDetailsServiceImpl implements UserDetailsService {
     @Override
     @Transactional
     public UserDetails loadUserByUsername(String userId) throws UsernameNotFoundException {
-        logger.debug("Loading user by userId: {}", userId);
+        logger.info("Loading user details for userId: {}", userId);
         User user = userRepository.findByUserIdAndDeletedFalse(userId)
                 .orElseThrow(() -> {
-                    logger.error("User Not Found with userId: {}", userId);
+                    logger.warn("User Not Found with userId: {}", userId);
                     return new UsernameNotFoundException("User Not Found with userId: " + userId);
                 });
 
-        logger.debug("User found: {}", user.getUserId());
+        logger.info("User loaded successfully: {} with role: {}", user.getUserId(), user.getRole());
         return UserDetailsImpl.build(user);
     }
 }

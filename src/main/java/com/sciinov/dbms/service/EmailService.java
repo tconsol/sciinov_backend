@@ -118,6 +118,7 @@ public class EmailService {
     public void sendPasswordResetEmail(String to, String userId, String token) {
         try {
             String resetLink = passwordResetUrl + "?token=" + token;
+            logger.debug("Password reset link generated: {}", resetLink);
 
             Context context = new Context();
             context.setVariable("userId", userId);

@@ -71,6 +71,8 @@ public class PasswordResetService {
         passwordResetTokenRepository.save(resetToken);
 
         logger.info("Password reset token generated for user: {}", userId);
+        logger.debug("Reset token: {}", token);
+        logger.debug("Token expiry: {}", expiryDate);
 
         // Send password reset email
         try {

@@ -7,6 +7,8 @@ import com.sciinov.dbms.repository.DashboardDataRepository;
 import com.sciinov.dbms.security.UserDetailsImpl;
 import com.sciinov.dbms.service.ExcelService;
 import com.sciinov.dbms.service.ExportService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Sort;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -25,6 +27,8 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/dashboard-data")
 public class DashboardDataController {
+    private static final Logger logger = LoggerFactory.getLogger(DashboardDataController.class);
+
     @Autowired
     private ExcelService excelService;
     
@@ -39,14 +43,19 @@ public class DashboardDataController {
     public ResponseEntity<?> uploadExcel(@RequestParam("file") MultipartFile file,
                                          @RequestParam("conferenceId") String conferenceId,
                                          @RequestParam("dashboardMasterId") String dashboardMasterId) {
+        logger.info("POST /api/dashboard-data/upload - Uploading file: {} for conference: {} dashboard: {}",
+                    file.getOriginalFilename(), conferenceId, dashboardMasterId);
         try {
             // Access check is done inside ExcelService
             excelService.processExcelFile(file, conferenceId, dashboardMasterId);
+            logger.info("POST /api/dashboard-data/upload - File uploaded successfully: {}", file.getOriginalFilename());
             return ResponseEntity.ok("File uploaded successfully!");
         } catch (IOException e) {
+            logger.error("POST /api/dashboard-data/upload - Failed to process file: {} - {}", file.getOriginalFilename(), e.getMessage());
             return ResponseEntity.badRequest().body("Failed to process file: " + e.getMessage());
         } catch (RuntimeException e) {
-             return ResponseEntity.badRequest().body(e.getMessage());
+            logger.error("POST /api/dashboard-data/upload - Runtime error: {}", e.getMessage());
+            return ResponseEntity.badRequest().body(e.getMessage());
         }
     }
     
@@ -56,9 +65,13 @@ public class DashboardDataController {
                                                 @RequestParam String dashboardMasterId,
                                                 @RequestParam Long fromSerialNo,
                                                 @RequestParam Long toSerialNo) {
+        logger.info("GET /api/dashboard-data - Retrieving data for conference: {} dashboard: {} range: {}-{}",
+                    conferenceId, dashboardMasterId, fromSerialNo, toSerialNo);
         validateAccess(conferenceId);
-        return dashboardDataRepository.findByConferenceIdAndDashboardMasterIdAndSerialNoBetween(
+        List<DashboardData> data = dashboardDataRepository.findByConferenceIdAndDashboardMasterIdAndSerialNoBetween(
                 conferenceId, dashboardMasterId, fromSerialNo, toSerialNo, Sort.by(Sort.Direction.ASC, "serialNo"));
+        logger.info("GET /api/dashboard-data - Retrieved {} records", data.size());
+        return data;
     }
 
     /**
@@ -76,7 +89,7 @@ public class DashboardDataController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(required = false) String region,
             @RequestParam(required = false) String country) {
-
+        logger.info("GET /api/dashboard-data/filter - Filtering data for conference: {} dashboard: {}", conferenceId, dashboardMasterId);
         validateAccess(conferenceId);
 
         ExportFilterRequest filterRequest = new ExportFilterRequest();
@@ -90,6 +103,7 @@ public class DashboardDataController {
         filterRequest.setCountry(country);
 
         List<DashboardData> data = exportService.getFilteredData(filterRequest);
+        logger.info("GET /api/dashboard-data/filter - Retrieved {} filtered records", data.size());
         return ResponseEntity.ok(data);
     }
 
@@ -104,7 +118,7 @@ public class DashboardDataController {
             @RequestParam String dashboardMasterId,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
-
+        logger.info("GET /api/dashboard-data/by-date - Date range filter: {} to {}", startDate, endDate);
         validateAccess(conferenceId);
 
         ExportFilterRequest filterRequest = new ExportFilterRequest();
@@ -114,6 +128,7 @@ public class DashboardDataController {
         filterRequest.setEndDate(endDate);
 
         List<DashboardData> data = exportService.getFilteredData(filterRequest);
+        logger.info("GET /api/dashboard-data/by-date - Retrieved {} records", data.size());
         return ResponseEntity.ok(data);
     }
 
@@ -127,7 +142,7 @@ public class DashboardDataController {
             @RequestParam String conferenceId,
             @RequestParam String dashboardMasterId,
             @RequestParam String region) {
-
+        logger.info("GET /api/dashboard-data/by-region - Region filter: {}", region);
         validateAccess(conferenceId);
 
         ExportFilterRequest filterRequest = new ExportFilterRequest();
@@ -136,6 +151,7 @@ public class DashboardDataController {
         filterRequest.setRegion(region);
 
         List<DashboardData> data = exportService.getFilteredData(filterRequest);
+        logger.info("GET /api/dashboard-data/by-region - Retrieved {} records", data.size());
         return ResponseEntity.ok(data);
     }
 
@@ -149,7 +165,7 @@ public class DashboardDataController {
             @RequestParam String conferenceId,
             @RequestParam String dashboardMasterId,
             @RequestParam String country) {
-
+        logger.info("GET /api/dashboard-data/by-country - Country filter: {}", country);
         validateAccess(conferenceId);
 
         ExportFilterRequest filterRequest = new ExportFilterRequest();
@@ -158,6 +174,7 @@ public class DashboardDataController {
         filterRequest.setCountry(country);
 
         List<DashboardData> data = exportService.getFilteredData(filterRequest);
+        logger.info("GET /api/dashboard-data/by-country - Retrieved {} records", data.size());
         return ResponseEntity.ok(data);
     }
 
@@ -175,7 +192,7 @@ public class DashboardDataController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(required = false) String region,
             @RequestParam(required = false) String country) {
-
+        logger.info("GET /api/dashboard-data/count - Counting filtered records");
         validateAccess(conferenceId);
 
         ExportFilterRequest filterRequest = new ExportFilterRequest();
@@ -189,7 +206,9 @@ public class DashboardDataController {
         filterRequest.setCountry(country);
 
         List<DashboardData> data = exportService.getFilteredData(filterRequest);
-        return ResponseEntity.ok((long) data.size());
+        long count = data.size();
+        logger.info("GET /api/dashboard-data/count - Total count: {}", count);
+        return ResponseEntity.ok(count);
     }
 
     private void validateAccess(String conferenceId) {

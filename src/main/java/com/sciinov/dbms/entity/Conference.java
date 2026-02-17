@@ -6,6 +6,8 @@ import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Document(collection = "conferences")
 public class Conference {
@@ -15,6 +17,9 @@ public class Conference {
     private String imageUrl;
     private Status status; // ACTIVE / INACTIVE
     
+    // List of Dashboard Master IDs associated with this conference
+    private List<String> dashboardMasterIds = new ArrayList<>();
+
     @CreatedDate
     private LocalDateTime createdAt;
     
@@ -36,6 +41,8 @@ public class Conference {
     public void setImageUrl(String imageUrl) { this.imageUrl = imageUrl; }
     public Status getStatus() { return status; }
     public void setStatus(Status status) { this.status = status; }
+    public List<String> getDashboardMasterIds() { return dashboardMasterIds; }
+    public void setDashboardMasterIds(List<String> dashboardMasterIds) { this.dashboardMasterIds = dashboardMasterIds; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }

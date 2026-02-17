@@ -45,7 +45,7 @@ public class AuthController {
 
     @PostMapping("/signin")
     public ResponseEntity<?> authenticateUser(@Valid @RequestBody LoginRequest loginRequest) {
-        logger.info("Attempting to authenticate user: {}", loginRequest.getUserId());
+        logger.info("POST /api/auth/signin - Authenticating user: {}", loginRequest.getUserId());
 
         try {
             Authentication authentication = authenticationManager.authenticate(
@@ -59,7 +59,7 @@ public class AuthController {
                     .map(item -> item.getAuthority())
                     .collect(Collectors.toList());
 
-            logger.info("User authenticated successfully: {}", loginRequest.getUserId());
+            logger.info("POST /api/auth/signin - User authenticated successfully: {} with roles: {}", loginRequest.getUserId(), roles);
 
             return ResponseEntity.ok(new JwtResponse(jwt,
                     userDetails.getId(),
@@ -67,7 +67,7 @@ public class AuthController {
                     userDetails.getUser().getEmail(),
                     roles));
         } catch (AuthenticationException e) {
-            logger.error("Authentication failed for user: {}", loginRequest.getUserId(), e);
+            logger.warn("POST /api/auth/signin - Authentication failed for user: {} - {}", loginRequest.getUserId(), e.getMessage());
             throw e;
         }
     }
@@ -77,11 +77,13 @@ public class AuthController {
      */
     @PostMapping("/forgot-password")
     public ResponseEntity<PasswordResetTokenResponse> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
-        logger.info("Forgot password request for userId: {}", request.getUserId());
+        logger.info("POST /api/auth/forgot-password - Processing password reset request for userId: {}", request.getUserId());
         PasswordResetTokenResponse response = passwordResetService.generatePasswordResetToken(request);
         if (response.isSuccess()) {
+            logger.info("POST /api/auth/forgot-password - Password reset token generated for: {} sent to: {}", request.getUserId(), response.getEmail());
             return ResponseEntity.ok(response);
         }
+        logger.warn("POST /api/auth/forgot-password - Failed to generate token for: {} - {}", request.getUserId(), response.getMessage());
         return ResponseEntity.badRequest().body(response);
     }
 
@@ -90,11 +92,13 @@ public class AuthController {
      */
     @GetMapping("/validate-reset-token")
     public ResponseEntity<MessageResponse> validateResetToken(@RequestParam String token) {
-        logger.info("Validating reset token");
+        logger.info("GET /api/auth/validate-reset-token - Validating reset token");
         MessageResponse response = passwordResetService.validateResetToken(token);
         if (response.isSuccess()) {
+            logger.info("GET /api/auth/validate-reset-token - Token validated successfully");
             return ResponseEntity.ok(response);
         }
+        logger.warn("GET /api/auth/validate-reset-token - Token validation failed: {}", response.getMessage());
         return ResponseEntity.badRequest().body(response);
     }
 
@@ -103,11 +107,13 @@ public class AuthController {
      */
     @PostMapping("/reset-password")
     public ResponseEntity<MessageResponse> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
-        logger.info("Reset password request");
+        logger.info("POST /api/auth/reset-password - Processing password reset");
         MessageResponse response = passwordResetService.resetPassword(request);
         if (response.isSuccess()) {
+            logger.info("POST /api/auth/reset-password - Password reset successful");
             return ResponseEntity.ok(response);
         }
+        logger.warn("POST /api/auth/reset-password - Password reset failed: {}", response.getMessage());
         return ResponseEntity.badRequest().body(response);
     }
 
@@ -116,11 +122,13 @@ public class AuthController {
      */
     @PostMapping("/forgot-username")
     public ResponseEntity<ForgotUsernameResponse> forgotUsername(@RequestBody ForgotUsernameRequest request) {
-        logger.info("Forgot username request");
+        logger.info("POST /api/auth/forgot-username - Processing username recovery request");
         ForgotUsernameResponse response = passwordResetService.findUsername(request);
         if (response.isSuccess()) {
+            logger.info("POST /api/auth/forgot-username - Username recovery email sent to: {}", response.getEmail());
             return ResponseEntity.ok(response);
         }
+        logger.warn("POST /api/auth/forgot-username - Username recovery failed: {}", response.getMessage());
         return ResponseEntity.badRequest().body(response);
     }
 
@@ -131,11 +139,13 @@ public class AuthController {
     @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
     public ResponseEntity<MessageResponse> changePassword(@Valid @RequestBody ChangePasswordRequest request) {
         UserDetailsImpl userDetails = (UserDetailsImpl) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        logger.info("Change password request for user: {}", userDetails.getUsername());
+        logger.info("POST /api/auth/change-password - User {} changing password", userDetails.getUsername());
         MessageResponse response = passwordResetService.changePassword(userDetails.getUsername(), request);
         if (response.isSuccess()) {
+            logger.info("POST /api/auth/change-password - Password changed successfully for: {}", userDetails.getUsername());
             return ResponseEntity.ok(response);
         }
+        logger.warn("POST /api/auth/change-password - Password change failed for: {} - {}", userDetails.getUsername(), response.getMessage());
         return ResponseEntity.badRequest().body(response);
     }
 }

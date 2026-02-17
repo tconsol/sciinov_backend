@@ -6,6 +6,8 @@ import com.sciinov.dbms.entity.User;
 import com.sciinov.dbms.security.UserDetailsImpl;
 import com.sciinov.dbms.service.ExportService;
 import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
@@ -22,6 +24,8 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/export")
 public class ExportController {
+    private static final Logger logger = LoggerFactory.getLogger(ExportController.class);
+
     @Autowired
     private ExportService exportService;
 
@@ -33,8 +37,10 @@ public class ExportController {
                               @RequestParam String dashboardMasterId,
                               @RequestParam Long fromSerialNo,
                               @RequestParam Long toSerialNo) throws IOException {
+        logger.info("GET /api/export/excel - Exporting to Excel: range {}-{}", fromSerialNo, toSerialNo);
         validateAccess(conferenceId);
         exportService.exportToExcel(response, conferenceId, dashboardMasterId, fromSerialNo, toSerialNo);
+        logger.info("GET /api/export/excel - Excel export completed");
     }
 
     @GetMapping("/pdf")
@@ -44,8 +50,10 @@ public class ExportController {
                             @RequestParam String dashboardMasterId,
                             @RequestParam Long fromSerialNo,
                             @RequestParam Long toSerialNo) throws IOException {
+        logger.info("GET /api/export/pdf - Exporting to PDF: range {}-{}", fromSerialNo, toSerialNo);
         validateAccess(conferenceId);
         exportService.exportToPdf(response, conferenceId, dashboardMasterId, fromSerialNo, toSerialNo);
+        logger.info("GET /api/export/pdf - PDF export completed");
     }
 
     /**
@@ -63,12 +71,14 @@ public class ExportController {
                                        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
                                        @RequestParam(required = false) String region,
                                        @RequestParam(required = false) String country) throws IOException {
+        logger.info("GET /api/export/excel/advanced - Exporting to Excel with filters: {}", conferenceId);
         validateAccess(conferenceId);
 
         ExportFilterRequest filterRequest = buildFilterRequest(conferenceId, dashboardMasterId,
                 fromSerialNo, toSerialNo, startDate, endDate, region, country);
 
         exportService.exportToExcelWithFilters(response, filterRequest);
+        logger.info("GET /api/export/excel/advanced - Excel export with filters completed");
     }
 
     /**
@@ -86,12 +96,14 @@ public class ExportController {
                                      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
                                      @RequestParam(required = false) String region,
                                      @RequestParam(required = false) String country) throws IOException {
+        logger.info("GET /api/export/pdf/advanced - Exporting to PDF with filters: {}", conferenceId);
         validateAccess(conferenceId);
 
         ExportFilterRequest filterRequest = buildFilterRequest(conferenceId, dashboardMasterId,
                 fromSerialNo, toSerialNo, startDate, endDate, region, country);
 
         exportService.exportToPdfWithFilters(response, filterRequest);
+        logger.info("GET /api/export/pdf/advanced - PDF export with filters completed");
     }
 
     /**
@@ -101,8 +113,10 @@ public class ExportController {
     @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
     public void exportToExcelWithFilter(HttpServletResponse response,
                                          @RequestBody ExportFilterRequest filterRequest) throws IOException {
+        logger.info("POST /api/export/excel/filter - Exporting to Excel with filter: {}", filterRequest);
         validateAccess(filterRequest.getConferenceId());
         exportService.exportToExcelWithFilters(response, filterRequest);
+        logger.info("POST /api/export/excel/filter - Excel export with filter completed");
     }
 
     /**
@@ -112,8 +126,10 @@ public class ExportController {
     @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
     public void exportToPdfWithFilter(HttpServletResponse response,
                                        @RequestBody ExportFilterRequest filterRequest) throws IOException {
+        logger.info("POST /api/export/pdf/filter - Exporting to PDF with filter: {}", filterRequest);
         validateAccess(filterRequest.getConferenceId());
         exportService.exportToPdfWithFilters(response, filterRequest);
+        logger.info("POST /api/export/pdf/filter - PDF export with filter completed");
     }
 
     /**
@@ -130,12 +146,14 @@ public class ExportController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(required = false) String region,
             @RequestParam(required = false) String country) {
+        logger.info("GET /api/export/preview - Previewing filtered data: {}", conferenceId);
         validateAccess(conferenceId);
 
         ExportFilterRequest filterRequest = buildFilterRequest(conferenceId, dashboardMasterId,
                 fromSerialNo, toSerialNo, startDate, endDate, region, country);
 
         List<DashboardData> data = exportService.getFilteredData(filterRequest);
+        logger.info("GET /api/export/preview - Previewed data count: {}", data.size());
         return ResponseEntity.ok(data);
     }
 
@@ -147,8 +165,10 @@ public class ExportController {
     public ResponseEntity<List<String>> getDistinctRegions(
             @RequestParam String conferenceId,
             @RequestParam String dashboardMasterId) {
+        logger.info("GET /api/export/regions - Fetching distinct regions: {}", conferenceId);
         validateAccess(conferenceId);
         List<String> regions = exportService.getDistinctRegions(conferenceId, dashboardMasterId);
+        logger.info("GET /api/export/regions - Distinct regions count: {}", regions.size());
         return ResponseEntity.ok(regions);
     }
 
@@ -160,8 +180,10 @@ public class ExportController {
     public ResponseEntity<List<String>> getDistinctCountries(
             @RequestParam String conferenceId,
             @RequestParam String dashboardMasterId) {
+        logger.info("GET /api/export/countries - Fetching distinct countries: {}", conferenceId);
         validateAccess(conferenceId);
         List<String> countries = exportService.getDistinctCountries(conferenceId, dashboardMasterId);
+        logger.info("GET /api/export/countries - Distinct countries count: {}", countries.size());
         return ResponseEntity.ok(countries);
     }
 
