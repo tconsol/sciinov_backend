@@ -1,31 +1,33 @@
-# Compiled class file
-*.class
-
-# Environment files (contains secrets)
+########################################
+# Environment & Configuration Files
+########################################
 .env
 .env.local
 .env.*.local
-.env.prod
-.env.dev
-.env.staging
+.env.*.example
 
-# Google Cloud credentials
-service-account-key.json
-gcs-credentials.json
+########################################
+# Credentials & Secrets
+########################################
+*.pem
+*.key
+*.crt
+*.pfx
+*.p12
 *-credentials.json
+*credentials*.json
+service-account*.json
+gcs-credentials.json
 fineflux-*.json
-*.json.secret
+*.secret
+*.jks
+*.keystore
 
-# Log file
-*.log
-
-# BlueJ files
+########################################
+# Java & Compilation
+########################################
+*.class
 *.ctxt
-
-# Mobile Tools for Java (J2ME)
-.mtj.tmp/
-
-# Package Files #
 *.jar
 *.war
 *.nar
@@ -33,12 +35,17 @@ fineflux-*.json
 *.zip
 *.tar.gz
 *.rar
-
-# virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
 hs_err_pid*
 
-# Maven
+########################################
+# Build & Maven
+########################################
 target/
+build/
+dist/
+*.egg-info/
+.mvn/wrapper/maven-wrapper.jar
+.mvn/wrapper/maven-wrapper.properties
 pom.xml.tag
 pom.xml.releaseBackup
 pom.xml.versionsBackup
@@ -46,35 +53,129 @@ pom.xml.next
 release.properties
 dependency-reduced-pom.xml
 buildNumber.properties
-.mvn/timing.properties
-.mvn/wrapper/maven-wrapper.properties
 
-# IntelliJ IDEA
+########################################
+# IDE - IntelliJ IDEA
+########################################
 .idea/
 *.iml
 *.iws
 *.ipr
+*.iml
 out/
+*.swp
+*.swo
+*~
 
-# Eclipse
-.classpath
+########################################
+# IDE - Eclipse
+########################################
 .project
+.classpath
+.c9/
+*.launch
 .settings/
+.metadata
+local.properties
 bin/
 
-# NetBeans
-nbproject/private/
+########################################
+# IDE - VS Code
+########################################
+.vscode/
+.vscode/settings.json
+.vscode/tasks.json
+.vscode/launch.json
+.vscode/extensions.json
+
+########################################
+# IDE - NetBeans
+########################################
+nbproject/
 build/
 nbbuild/
 dist/
 nbdist/
 .nb-gradle/
+*.nbmake
 
-# VS Code
-.vscode/
+########################################
+# Logging
+########################################
+logs/
+*.log
+*.log.*
 
-# Mac
+########################################
+# OS Files
+########################################
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+.windows
+
+########################################
+# Node (if frontend integrated)
+########################################
+node_modules/
+npm-debug.log
+yarn-error.log
+package-lock.json
+yarn.lock
+
+########################################
+# Database
+########################################
+*.db
+*.sqlite
+*.sqlite3
+*.h2.db
+
+########################################
+# Runtime & Temporary
+########################################
+tmp/
+temp/
+.tmp/
+*.tmp
+*.bak
+*.swp
+*.swo
+*~
 .DS_Store
 
+########################################
+# Docker
+########################################
+.dockerignore
+docker-compose.override.yml
+
+########################################
 # Spring Boot
+########################################
 help.md
+HELP.md
+application-dev.properties
+application-prod.properties
+application-local.properties
+
+########################################
+# Testing
+########################################
+coverage/
+.coverage
+.pytest_cache/
+htmlcov/
+
+########################################
+# Project Specific
+########################################
+fineflux-c0bba53c7d23.json
+/logs/
+/.gradle/
+/build/
+!.gitkeep
