@@ -10,6 +10,8 @@
 service-account-key.json
 gcs-credentials.json
 *-credentials.json
+fineflux-*.json
+*.json.secret
 
 # Log file
 *.log
