@@ -1,6 +1,16 @@
 # Compiled class file
 *.class
 
+# Environment files (contains secrets)
+.env
+.env.local
+.env.*.local
+
+# Google Cloud credentials
+service-account-key.json
+gcs-credentials.json
+*-credentials.json
+
 # Log file
 *.log
 

@@ -32,6 +32,9 @@ public class PasswordResetService {
     @Autowired
     private PasswordEncoder passwordEncoder;
 
+    @Autowired
+    private EmailService emailService;
+
     /**
      * Generate password reset token for a user based on userId
      */
@@ -69,10 +72,15 @@ public class PasswordResetService {
 
         logger.info("Password reset token generated for user: {}", userId);
 
-        // In production, you would send this token via email/SMS
-        // For now, we return it in the response (for testing/development)
+        // Send password reset email
+        try {
+            emailService.sendPasswordResetEmail(user.getEmail(), user.getUserId(), token);
+        } catch (Exception e) {
+            logger.error("Failed to send password reset email: {}", e.getMessage());
+        }
+
         return new PasswordResetTokenResponse(token, user.getUserId(), user.getEmail(),
-            "Password reset token generated successfully. Token is valid for " + TOKEN_VALIDITY_HOURS + " hours.", true);
+            "Password reset link has been sent to your registered email. Token is valid for " + TOKEN_VALIDITY_HOURS + " hours.", true);
     }
 
     /**
@@ -137,6 +145,13 @@ public class PasswordResetService {
         resetToken.setUsed(true);
         passwordResetTokenRepository.save(resetToken);
 
+        // Send password changed confirmation email
+        try {
+            emailService.sendPasswordChangedEmail(user.getEmail(), user.getFirstName());
+        } catch (Exception e) {
+            logger.error("Failed to send password changed email: {}", e.getMessage());
+        }
+
         logger.info("Password reset successful for user: {}", user.getUserId());
 
         return new MessageResponse("Password has been reset successfully. You can now login with your new password.", true);
@@ -179,12 +194,18 @@ public class PasswordResetService {
                 "Your account is inactive. Please contact administrator.", false);
         }
 
+        // Send username recovery email
+        try {
+            emailService.sendForgotUsernameEmail(user.getEmail(), user.getUserId(), user.getFirstName());
+        } catch (Exception e) {
+            logger.error("Failed to send forgot username email: {}", e.getMessage());
+        }
+
         logger.info("Username found for recovery request");
 
-        // Return masked username for security
-        // In production, send the full username via email/SMS
+        // Return masked username for security (actual username sent via email)
         return new ForgotUsernameResponse(user.getUserId(), user.getEmail(),
-            "Username found! Your User ID has been sent to your registered email/phone.", true);
+            "Your User ID has been sent to your registered email.", true);
     }
 
     /**
@@ -222,6 +243,13 @@ public class PasswordResetService {
         user.setPassword(passwordEncoder.encode(request.getNewPassword()));
         user.setUpdatedAt(LocalDateTime.now());
         userRepository.save(user);
+
+        // Send password changed confirmation email
+        try {
+            emailService.sendPasswordChangedEmail(user.getEmail(), user.getFirstName());
+        } catch (Exception e) {
+            logger.error("Failed to send password changed email: {}", e.getMessage());
+        }
 
         logger.info("Password changed successfully for user: {}", userId);
 
