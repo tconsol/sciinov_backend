@@ -99,11 +99,29 @@ public class WebSecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOrigins(Arrays.asList(allowedOrigins.split(",")));
-        configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
-        configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "X-Correlation-ID", "Accept"));
-        configuration.setExposedHeaders(Arrays.asList("X-Correlation-ID", "Authorization"));
+        configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"));
+        // Allow all headers that the frontend might send
+        configuration.setAllowedHeaders(Arrays.asList(
+                "Authorization",
+                "Content-Type",
+                "Accept",
+                "X-Requested-With",  // ✅ Critical: Required for CORS preflight
+                "X-Correlation-ID",
+                "X-CSRF-Token",
+                "Origin",
+                "Cache-Control",
+                "Access-Control-Request-Method",
+                "Access-Control-Request-Headers"
+        ));
+        // Expose headers that frontend might need to read
+        configuration.setExposedHeaders(Arrays.asList(
+                "Authorization",
+                "X-Correlation-ID",
+                "X-Total-Count",
+                "X-Page-Number"
+        ));
         configuration.setAllowCredentials(true);
-        configuration.setMaxAge(3600L);
+        configuration.setMaxAge(3600L);  // 1 hour cache for preflight
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
