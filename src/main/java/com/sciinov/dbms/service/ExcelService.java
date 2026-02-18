@@ -118,6 +118,7 @@ public class ExcelService {
         // Log Activity
         AdminActivityLog log = new AdminActivityLog();
         log.setAdminId(admin.getId());
+        log.setAdminName(admin.getFirstName() + " " + admin.getLastName()); // Set Admin Name
         log.setConferenceId(conferenceId);
         log.setDashboardMasterId(dashboardMasterId);
         log.setActionType(AdminActivityLog.ActionType.UPLOAD_EXCEL);

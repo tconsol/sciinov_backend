@@ -2,11 +2,13 @@ package com.sciinov.dbms.controller;
 
 import com.sciinov.dbms.entity.AdminActivityLog;
 import com.sciinov.dbms.entity.DashboardUploadStats;
+import com.sciinov.dbms.security.UserDetailsImpl;
 import com.sciinov.dbms.service.AnalyticsService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -19,6 +21,28 @@ public class AnalyticsController {
 
     @Autowired
     private AnalyticsService analyticsService;
+
+    @GetMapping("/upload-stats/me")
+    @PreAuthorize("hasRole('ADMIN')")
+    public List<DashboardUploadStats> getMyAdminUploadStats() {
+        UserDetailsImpl userDetails = (UserDetailsImpl) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        String adminId = userDetails.getId();
+        logger.info("GET /api/analytics/upload-stats/me - Retrieving upload stats for admin {}", adminId);
+        List<DashboardUploadStats> stats = analyticsService.getUploadStatsByAdmin(adminId);
+        logger.info("GET /api/analytics/upload-stats/me - Retrieved {} upload stats for admin {}", stats.size(), adminId);
+        return stats;
+    }
+
+    @GetMapping("/logs/me")
+    @PreAuthorize("hasRole('ADMIN')")
+    public List<AdminActivityLog> getMyAdminLogs() {
+        UserDetailsImpl userDetails = (UserDetailsImpl) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        String adminId = userDetails.getId();
+        logger.info("GET /api/analytics/logs/me - Retrieving activity logs for admin {}", adminId);
+        List<AdminActivityLog> logs = analyticsService.getActivityLogsByAdmin(adminId);
+        logger.info("GET /api/analytics/logs/me - Retrieved {} activity logs for admin {}", logs.size(), adminId);
+        return logs;
+    }
 
     @GetMapping("/upload-stats/admin/{adminId}")
     @PreAuthorize("hasRole('SUPER_ADMIN')")

@@ -10,6 +10,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/users")
@@ -77,5 +78,15 @@ public class UserController {
         userService.deleteUser(id);
         logger.info("DELETE /api/users/{} - User deleted successfully", id);
         return ResponseEntity.ok().build();
+    }
+
+    @PatchMapping("/{id}/status")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public ResponseEntity<User> updateUserStatus(@PathVariable String id, @RequestBody Map<String, Boolean> status) {
+        logger.info("PATCH /api/users/{}/status - Updating user status", id);
+        boolean newStatus = status.get("status");
+        User updated = userService.updateUserStatus(id, newStatus);
+        logger.info("PATCH /api/users/{}/status - User status updated successfully to {}", id, newStatus);
+        return ResponseEntity.ok(updated);
     }
 }

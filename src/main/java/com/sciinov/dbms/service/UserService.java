@@ -85,4 +85,12 @@ public class UserService {
         user.setUpdatedAt(LocalDateTime.now());
         userRepository.save(user);
     }
+
+    public User updateUserStatus(String id, boolean status) {
+        User user = userRepository.findByIdAndDeletedFalse(id)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+        user.setStatus(status);
+        user.setUpdatedAt(LocalDateTime.now());
+        return userRepository.save(user);
+    }
 }

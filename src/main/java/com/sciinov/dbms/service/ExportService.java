@@ -12,6 +12,7 @@ import com.lowagie.text.pdf.PdfWriter;
 import com.sciinov.dbms.dto.ExportFilterRequest;
 import com.sciinov.dbms.entity.AdminActivityLog;
 import com.sciinov.dbms.entity.DashboardData;
+import com.sciinov.dbms.entity.User;
 import com.sciinov.dbms.repository.AdminActivityLogRepository;
 import com.sciinov.dbms.repository.DashboardDataRepository;
 import com.sciinov.dbms.repository.UserRepository;
@@ -291,6 +292,12 @@ public class ExportService {
         
         AdminActivityLog log = new AdminActivityLog();
         log.setAdminId(userDetails.getId());
+        
+        // Fetch user to get name
+        userRepository.findById(userDetails.getId()).ifPresent(user -> {
+            log.setAdminName(user.getFirstName() + " " + user.getLastName());
+        });
+
         log.setConferenceId(conferenceId);
         log.setDashboardMasterId(dashboardMasterId);
         log.setActionType(actionType);

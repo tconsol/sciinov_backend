@@ -11,6 +11,7 @@ public class AdminActivityLog {
     @Id
     private String id;
     private String adminId;
+    private String adminName; // Added field
     private String conferenceId;
     private String dashboardMasterId;
     private ActionType actionType;
@@ -29,6 +30,8 @@ public class AdminActivityLog {
     public void setId(String id) { this.id = id; }
     public String getAdminId() { return adminId; }
     public void setAdminId(String adminId) { this.adminId = adminId; }
+    public String getAdminName() { return adminName; } // Added getter
+    public void setAdminName(String adminName) { this.adminName = adminName; } // Added setter
     public String getConferenceId() { return conferenceId; }
     public void setConferenceId(String conferenceId) { this.conferenceId = conferenceId; }
     public String getDashboardMasterId() { return dashboardMasterId; }
