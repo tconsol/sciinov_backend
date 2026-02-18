@@ -1,6 +1,7 @@
 package com.sciinov.dbms.controller;
 
 import com.sciinov.dbms.entity.User;
+import com.sciinov.dbms.dto.AdminConferenceResponse;
 import com.sciinov.dbms.service.UserService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,7 +29,16 @@ public class UserController {
         logger.info("GET /api/users/admins - Retrieved {} admin users", admins.size());
         return admins;
     }
-    
+
+    @GetMapping("/admins/conferences/all")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public ResponseEntity<List<AdminConferenceResponse>> getAllAdminsWithConferences() {
+        logger.info("GET /api/users/admins/conferences/all - Retrieving all admins with assigned conferences");
+        List<AdminConferenceResponse> adminsWithConferences = userService.getAllAdminsWithConferences();
+        logger.info("GET /api/users/admins/conferences/all - Retrieved {} admins with conferences", adminsWithConferences.size());
+        return ResponseEntity.ok(adminsWithConferences);
+    }
+
     @GetMapping("/super-admins")
     @PreAuthorize("hasRole('SUPER_ADMIN')")
     public List<User> getAllSuperAdmins() {
@@ -83,10 +93,41 @@ public class UserController {
     @PatchMapping("/{id}/status")
     @PreAuthorize("hasRole('SUPER_ADMIN')")
     public ResponseEntity<User> updateUserStatus(@PathVariable String id, @RequestBody Map<String, Boolean> status) {
-        logger.info("PATCH /api/users/{}/status - Updating user status", id);
+        logger.info("PATCH /api/users/{}/status - Updating user status");
         boolean newStatus = status.get("status");
         User updated = userService.updateUserStatus(id, newStatus);
         logger.info("PATCH /api/users/{}/status - User status updated successfully to {}", id, newStatus);
+        return ResponseEntity.ok(updated);
+    }
+
+    @GetMapping("/{adminId}/conferences")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public ResponseEntity<List<String>> getAdminConferences(@PathVariable String adminId) {
+        logger.info("GET /api/users/{}/conferences - Retrieving assigned conferences for admin", adminId);
+        List<String> conferences = userService.getAdminConferences(adminId);
+        logger.info("GET /api/users/{}/conferences - Retrieved {} conferences", adminId, conferences.size());
+        return ResponseEntity.ok(conferences);
+    }
+
+    @PostMapping("/{adminId}/conferences/{conferenceId}")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public ResponseEntity<User> assignConferenceToAdmin(
+            @PathVariable String adminId,
+            @PathVariable String conferenceId) {
+        logger.info("POST /api/users/{}/conferences/{} - Assigning conference to admin", adminId, conferenceId);
+        User updated = userService.assignConferenceToAdmin(adminId, conferenceId);
+        logger.info("POST /api/users/{}/conferences/{} - Conference assigned successfully", adminId, conferenceId);
+        return ResponseEntity.ok(updated);
+    }
+
+    @DeleteMapping("/{adminId}/conferences/{conferenceId}")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public ResponseEntity<User> removeConferenceFromAdmin(
+            @PathVariable String adminId,
+            @PathVariable String conferenceId) {
+        logger.info("DELETE /api/users/{}/conferences/{} - Removing conference from admin", adminId, conferenceId);
+        User updated = userService.removeConferenceFromAdmin(adminId, conferenceId);
+        logger.info("DELETE /api/users/{}/conferences/{} - Conference removed successfully", adminId, conferenceId);
         return ResponseEntity.ok(updated);
     }
 }

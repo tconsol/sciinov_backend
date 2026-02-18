@@ -4,14 +4,19 @@ import com.sciinov.dbms.dto.ConferenceDashboardRequest;
 import com.sciinov.dbms.dto.ConferenceDashboardResponse;
 import com.sciinov.dbms.entity.Conference;
 import com.sciinov.dbms.entity.DashboardMaster;
+import com.sciinov.dbms.entity.User;
+import com.sciinov.dbms.repository.UserRepository;
+import com.sciinov.dbms.security.UserDetailsImpl;
 import com.sciinov.dbms.service.ConferenceService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
 import java.util.List;
 
 @CrossOrigin(origins = "*", maxAge = 3600)
@@ -23,12 +28,35 @@ public class ConferenceController {
     @Autowired
     private ConferenceService conferenceService;
 
+    @Autowired
+    private UserRepository userRepository;
+
     @GetMapping
     @PreAuthorize("hasRole('SUPER_ADMIN') or hasRole('ADMIN')")
     public List<Conference> getAllConferences() {
         logger.info("GET /api/conferences - Retrieving all conferences");
         List<Conference> conferences = conferenceService.getAllConferences();
         logger.info("GET /api/conferences - Retrieved {} conferences", conferences.size());
+        return conferences;
+    }
+
+    @GetMapping("/me")
+    @PreAuthorize("hasRole('ADMIN')")
+    public List<Conference> getMyConferences() {
+        UserDetailsImpl userDetails = (UserDetailsImpl) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        String userId = userDetails.getId();
+        logger.info("GET /api/conferences/me - Retrieving conferences for admin {}", userId);
+        
+        User user = userRepository.findById(userId).orElseThrow(() -> new RuntimeException("User not found"));
+        List<String> conferenceIds = user.getConferenceIds();
+        
+        if (conferenceIds == null || conferenceIds.isEmpty()) {
+            logger.info("GET /api/conferences/me - No conferences assigned to admin {}", userId);
+            return new ArrayList<>();
+        }
+        
+        List<Conference> conferences = conferenceService.getConferencesByIds(conferenceIds);
+        logger.info("GET /api/conferences/me - Retrieved {} conferences for admin {}", conferences.size(), userId);
         return conferences;
     }
 

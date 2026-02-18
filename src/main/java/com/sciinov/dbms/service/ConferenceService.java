@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
 @Service
 public class ConferenceService {
@@ -31,6 +32,16 @@ public class ConferenceService {
 
     public Optional<Conference> getConferenceById(String id) {
         return conferenceRepository.findByIdAndDeletedFalse(id);
+    }
+
+    public List<Conference> getConferencesByIds(List<String> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return new ArrayList<>();
+        }
+        Iterable<Conference> conferences = conferenceRepository.findAllById(ids);
+        return StreamSupport.stream(conferences.spliterator(), false)
+                .filter(c -> !c.isDeleted())
+                .collect(Collectors.toList());
     }
 
     public Conference createConference(Conference conference) {

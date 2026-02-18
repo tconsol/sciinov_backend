@@ -1078,6 +1078,85 @@ Authorization: Bearer {jwt_token}
 
 ---
 
+### 4.1B Get All Admins with Assigned Conferences 🔒 ⭐ (NEW)
+
+**Endpoint**: `GET /admins/conferences/all`  
+**Authentication**: ✅ **JWT Token Required**  
+**Access**: SUPER_ADMIN only  
+**HTTP Method**: GET  
+**Description**: Get all admins with their assigned conferences (cleaner response)
+
+**Request Headers**:
+```
+Authorization: Bearer {jwt_token}
+```
+
+**cURL Example**:
+```bash
+curl -X GET \
+  'http://localhost:8080/api/users/admins/conferences/all' \
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiJ9...' \
+  -H 'Content-Type: application/json'
+```
+
+**Response (200 OK)**:
+```json
+[
+  {
+    "adminId": "65g1234567890abcdef12345",
+    "userId": "johndoe",
+    "firstName": "John",
+    "lastName": "Doe",
+    "email": "john@example.com",
+    "phoneNumber": "9876543210",
+    "status": true,
+    "conferenceIds": [
+      "65e1234567890abcdef12345",
+      "65e1234567890abcdef12346"
+    ]
+  },
+  {
+    "adminId": "65g1234567890abcdef12347",
+    "userId": "janesmith",
+    "firstName": "Jane",
+    "lastName": "Smith",
+    "email": "jane@example.com",
+    "phoneNumber": "8765432109",
+    "status": true,
+    "conferenceIds": [
+      "65e1234567890abcdef12346"
+    ]
+  },
+  {
+    "adminId": "65g1234567890abcdef12348",
+    "userId": "bobwilson",
+    "firstName": "Bob",
+    "lastName": "Wilson",
+    "email": "bob@example.com",
+    "phoneNumber": "7654321098",
+    "status": false,
+    "conferenceIds": []
+  }
+]
+```
+
+**Response Fields**:
+- `adminId` - Unique MongoDB ID of the admin user
+- `userId` - Username of the admin
+- `firstName` - First name of the admin
+- `lastName` - Last name of the admin
+- `email` - Email address of the admin
+- `phoneNumber` - Phone number of the admin
+- `status` - Whether the admin account is active (true) or inactive (false)
+- `conferenceIds` - Array of conference IDs assigned to this admin (empty array if none)
+
+**Use Cases**:
+1. **Super Admin Dashboard** - Display all admins and their conference assignments
+2. **Conference Assignment Overview** - See which admins are responsible for which conferences
+3. **Admin Activity Tracking** - Monitor admin coverage across all conferences
+
+---
+
 ### 4.2 Get All Super Admins
 
 **Endpoint**: `GET /super-admins`  
@@ -1215,6 +1294,218 @@ Authorization: Bearer {jwt_token}
 **Response (200 OK)**:
 ```json
 {}
+```
+
+---
+
+### 4.7 Update User Status 🔒
+
+**Endpoint**: `PATCH /{id}/status`  
+**Authentication**: ✅ **JWT Token Required**  
+**Access**: SUPER_ADMIN only  
+**Description**: Enable or disable a user account
+
+**Request Headers**:
+```
+Authorization: Bearer {jwt_token}
+Content-Type: application/json
+```
+
+**Path Parameters**:
+```
+id: 65g1234567890abcdef12345
+```
+
+**Request Body**:
+```json
+{
+  "status": false
+}
+```
+
+**Response (200 OK)**:
+```json
+{
+  "id": "65g1234567890abcdef12345",
+  "firstName": "John",
+  "lastName": "Doe",
+  "userId": "johndoe",
+  "email": "john@example.com",
+  "phoneNumber": "9876543210",
+  "role": "ADMIN",
+  "status": false,
+  "conferenceIds": ["65e1234567890abcdef12345"],
+  "createdAt": "2024-02-01T10:00:00",
+  "updatedAt": "2026-02-17T14:00:00",
+  "deleted": false
+}
+```
+
+---
+
+### 4.8 Get Admin Conferences 🔒
+
+**Endpoint**: `GET /{adminId}/conferences`  
+**Authentication**: ✅ **JWT Token Required**  
+**Access**: SUPER_ADMIN only  
+**Description**: Get all conferences assigned to a specific admin
+
+**Request Headers**:
+```
+Authorization: Bearer {jwt_token}
+```
+
+**Path Parameters**:
+```
+adminId: 65g1234567890abcdef12345
+```
+
+**Response (200 OK)**:
+```json
+[
+  "65e1234567890abcdef12345",
+  "65e1234567890abcdef12346",
+  "65e1234567890abcdef12347"
+]
+```
+
+**Error Responses**:
+```json
+{
+  "message": "Admin user not found"
+}
+```
+```json
+{
+  "message": "User is not an admin"
+}
+```
+
+---
+
+### 4.9 Assign Conference to Admin 🔒
+
+**Endpoint**: `POST /{adminId}/conferences/{conferenceId}`  
+**Authentication**: ✅ **JWT Token Required**  
+**Access**: SUPER_ADMIN only  
+**HTTP Method**: POST  
+**Description**: Assign a conference to an admin
+
+**Request Headers**:
+```
+Authorization: Bearer {jwt_token}
+Content-Type: application/json
+```
+
+**Path Parameters**:
+```
+adminId: 65g1234567890abcdef12345
+conferenceId: 65e1234567890abcdef12345
+```
+
+**Response (200 OK)**:
+```json
+{
+  "id": "65g1234567890abcdef12345",
+  "firstName": "John",
+  "lastName": "Doe",
+  "userId": "johndoe",
+  "email": "john@example.com",
+  "phoneNumber": "9876543210",
+  "role": "ADMIN",
+  "status": true,
+  "conferenceIds": [
+    "65e1234567890abcdef12345",
+    "65e1234567890abcdef12346"
+  ],
+  "createdAt": "2024-02-01T10:00:00",
+  "updatedAt": "2026-02-17T14:05:00",
+  "deleted": false
+}
+```
+
+**Error Responses**:
+```json
+{
+  "message": "Admin user not found"
+}
+```
+```json
+{
+  "message": "User is not an admin"
+}
+```
+
+---
+
+### 4.10 Remove Conference from Admin 🔒 (⭐ MOST IMPORTANT)
+
+**Endpoint**: `DELETE /{adminId}/conferences/{conferenceId}`  
+**Authentication**: ✅ **JWT Token Required**  
+**Access**: SUPER_ADMIN only  
+**HTTP Method**: DELETE  
+**Description**: Remove an assigned conference from an admin
+
+**Request Headers**:
+```
+Authorization: Bearer {jwt_token}
+```
+
+**Path Parameters**:
+```
+adminId: 65g1234567890abcdef12345
+conferenceId: 65e1234567890abcdef12345
+```
+
+**cURL Example**:
+```bash
+curl -X DELETE \
+  'http://localhost:8080/api/users/65g1234567890abcdef12345/conferences/65e1234567890abcdef12345' \
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiJ9...' \
+  -H 'Content-Type: application/json'
+```
+
+**Response (200 OK)**:
+```json
+{
+  "id": "65g1234567890abcdef12345",
+  "firstName": "John",
+  "lastName": "Doe",
+  "userId": "johndoe",
+  "email": "john@example.com",
+  "phoneNumber": "9876543210",
+  "role": "ADMIN",
+  "status": true,
+  "conferenceIds": [
+    "65e1234567890abcdef12346"
+  ],
+  "createdAt": "2024-02-01T10:00:00",
+  "updatedAt": "2026-02-17T14:10:00",
+  "deleted": false
+}
+```
+
+**Error Responses**:
+
+*Admin Not Found (404)*:
+```json
+{
+  "message": "Admin user not found"
+}
+```
+
+*User is Not an Admin (400)*:
+```json
+{
+  "message": "User is not an admin"
+}
+```
+
+*Conference Not Assigned (400)*:
+```json
+{
+  "message": "Conference not assigned to this admin"
+}
 ```
 
 ---
