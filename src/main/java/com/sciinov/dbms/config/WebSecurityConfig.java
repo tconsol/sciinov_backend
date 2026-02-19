@@ -111,6 +111,8 @@ public class WebSecurityConfig {
                 "Content-Type",
                 "Accept",
                 "X-Requested-With",  // ✅ Critical: Required for CORS preflight
+                "X-User-Id",         // ✅ Custom header for user identification
+                "X-User-Name",       // ✅ Custom header for user name
                 "X-Correlation-ID",
                 "X-CSRF-Token",
                 "Origin",

@@ -18,6 +18,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
@@ -26,6 +27,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 @Service
 public class GoogleCloudStorageService {
@@ -57,30 +59,51 @@ public class GoogleCloudStorageService {
 
                 Path path = Path.of(credentialsPath);
                 if (Files.exists(path)) {
-                    GoogleCredentials credentials = GoogleCredentials.fromStream(
-                        new FileInputStream(credentialsPath)
-                    );
+                    try {
+                        GoogleCredentials credentials = GoogleCredentials.fromStream(
+                            new FileInputStream(credentialsPath)
+                        );
 
-                    storage = StorageOptions.newBuilder()
-                        .setProjectId(projectId)
-                        .setCredentials(credentials)
-                        .build()
-                        .getService();
+                        storage = StorageOptions.newBuilder()
+                            .setProjectId(projectId)
+                            .setCredentials(credentials)
+                            .build()
+                            .getService();
 
-                    isConfigured = true;
-                    logger.info("Google Cloud Storage initialized successfully for project: {}", projectId);
+                        logger.info("Google Cloud Storage credentials loaded successfully for project: {}", projectId);
 
-                    // Ensure bucket exists
-                    ensureBucketExists();
+                        // Ensure bucket exists - non-blocking
+                        ensureBucketExists();
+
+                        if (isConfigured) {
+                            logger.info("✅ GCS READY: All systems operational");
+                        } else {
+                            logger.warn("⚠️  GCS DEGRADED: Credentials valid but bucket access failed. " +
+                                "Upload features disabled. Check IAM permissions on service account.");
+                        }
+                    } catch (Exception authErr) {
+                        logger.warn("❌ GCS AUTHENTICATION FAILED: {}. " +
+                            "Credentials file at '{}' may be invalid. Application will continue without GCS.",
+                            authErr.getMessage(), credentialsPath);
+                        isConfigured = false;
+                        storage = null;
+                    }
                 } else {
-                    logger.warn("GCS credentials file not found at: {}. GCS features will be disabled.", credentialsPath);
+                    logger.warn("❌ GCS DISABLED: Credentials file not found at '{}'. " +
+                        "File upload features will be unavailable. Please place credentials file in project root.",
+                        credentialsPath);
+                    isConfigured = false;
                 }
             } else {
-                logger.warn("GCS configuration incomplete. GCS features will be disabled.");
+                logger.warn("❌ GCS DISABLED: Configuration incomplete in .env file. " +
+                    "Required: GCS_PROJECT_ID={}, GCS_CREDENTIALS_PATH={}, GCS_BUCKET_NAME={}",
+                    projectId, credentialsPath, bucketName);
+                isConfigured = false;
             }
         } catch (Exception e) {
-            logger.error("Failed to initialize Google Cloud Storage: {}", e.getMessage());
+            logger.error("❌ GCS INITIALIZATION ERROR: Unexpected error during setup: {}", e.getMessage());
             isConfigured = false;
+            storage = null;
         }
     }
 
@@ -93,19 +116,63 @@ public class GoogleCloudStorageService {
 
     /**
      * Ensure the bucket exists, create if not
+     * Handles permission errors gracefully - app continues to run without GCS
      */
     private void ensureBucketExists() {
+        if (storage == null) {
+            logger.warn("Storage object is null, skipping bucket verification");
+            isConfigured = false;
+            return;
+        }
+
         try {
             Bucket bucket = storage.get(bucketName);
             if (bucket == null) {
-                storage.create(BucketInfo.newBuilder(bucketName)
-                    .setStorageClass(StorageClass.STANDARD)
-                    .setLocation("US")
-                    .build());
-                logger.info("Created new GCS bucket: {}", bucketName);
+                // Bucket doesn't exist, try to create it
+                try {
+                    storage.create(BucketInfo.newBuilder(bucketName)
+                        .setStorageClass(StorageClass.STANDARD)
+                        .setLocation("US")
+                        .build());
+                    isConfigured = true;
+                    logger.info("✅ Created new GCS bucket: {}", bucketName);
+                } catch (com.google.api.gax.rpc.PermissionDeniedException e) {
+                    logger.warn("⚠️  Cannot create bucket '{}': Permission denied. " +
+                        "Service account needs roles/storage.bucketAdmin role. " +
+                        "Grant this role in Google Cloud Console: " +
+                        "IAM & Admin > IAM > sciinov@fineflux.iam.gserviceaccount.com > Add Role > Storage Bucket Admin",
+                        bucketName);
+                    isConfigured = false;
+                } catch (Exception e) {
+                    logger.warn("⚠️  Cannot create bucket '{}': {}. " +
+                        "Ensure bucket exists in Google Cloud Console with name '{}' and service account has permissions.",
+                        bucketName, e.getMessage(), bucketName);
+                    isConfigured = false;
+                }
+            } else {
+                // Bucket exists and is accessible
+                isConfigured = true;
+                logger.info("✅ GCS bucket '{}' verified and accessible", bucketName);
             }
+        } catch (com.google.api.gax.rpc.PermissionDeniedException e) {
+            // Permission denied to even check bucket
+            logger.error("❌ PERMISSION DENIED on bucket '{}': Service account lacks 'storage.buckets.get' permission. " +
+                "\n\n📋 TO FIX THIS:\n" +
+                "1. Go to: https://console.cloud.google.com/iam-admin/iam?project=fineflux\n" +
+                "2. Find service account: sciinov@fineflux.iam.gserviceaccount.com\n" +
+                "3. Click EDIT (pencil icon)\n" +
+                "4. Click 'ADD ANOTHER ROLE'\n" +
+                "5. Search for and select: 'Cloud Storage > Storage Object Admin' OR 'Cloud Storage > Storage Bucket Admin'\n" +
+                "6. Click SAVE\n" +
+                "7. Restart the application\n\n" +
+                "Error details: {}",
+                bucketName, e.getMessage());
+            isConfigured = false;
         } catch (Exception e) {
-            logger.error("Failed to ensure bucket exists: {}", e.getMessage());
+            logger.warn("⚠️  Failed to verify bucket access: {}. " +
+                "Check if bucket '{}' exists and service account has permissions.",
+                e.getMessage(), bucketName);
+            isConfigured = false;
         }
     }
 
@@ -133,6 +200,51 @@ public class GoogleCloudStorageService {
     }
 
     /**
+     * Generate a signed URL for a file in GCS
+     * Signed URLs allow authenticated access without making the bucket public
+     *
+     * @param blobName The blob name (full path) in GCS
+     * @return Signed URL with lifetime access (no expiration)
+     */
+    public String generateSignedUrl(String blobName) {
+        return generateSignedUrl(blobName, 3650); // 10 years = lifetime access
+    }
+
+    /**
+     * Generate a signed URL for a file in GCS with custom expiration
+     * Signed URLs allow authenticated access without making the bucket public
+     *
+     * @param blobName The blob name (full path) in GCS
+     * @param expirationDays Number of days the URL should remain valid (use 3650 for 10 years/lifetime)
+     * @return Signed URL with embedded authentication
+     */
+    public String generateSignedUrl(String blobName, int expirationDays) {
+        if (!isConfigured) {
+            throw new IllegalStateException(
+                "Google Cloud Storage is not properly configured."
+            );
+        }
+
+        try {
+            BlobId blobId = BlobId.of(bucketName, blobName);
+            BlobInfo blobInfo = BlobInfo.newBuilder(blobId).build();
+
+            URL signedUrl = storage.signUrl(
+                blobInfo,
+                expirationDays,
+                TimeUnit.DAYS
+            );
+
+            String expirationDesc = (expirationDays >= 3650) ? "lifetime" : expirationDays + " days";
+            logger.info("Generated signed URL for: {} (expires in: {})", blobName, expirationDesc);
+            return signedUrl.toString();
+        } catch (Exception e) {
+            logger.error("Failed to generate signed URL for {}: {}", blobName, e.getMessage());
+            throw new RuntimeException("Failed to generate signed URL: " + e.getMessage(), e);
+        }
+    }
+
+    /**
      * Sanitize folder name (remove special characters, replace spaces)
      */
     private String sanitizeFolderName(String name) {
@@ -145,11 +257,18 @@ public class GoogleCloudStorageService {
 
     /**
      * Upload file to GCS
-     * @return Public URL of the uploaded file
+     * @return Signed URL of the uploaded file (lifetime access, no expiration)
      */
     public String uploadFile(MultipartFile file, String conferenceId, String dashboardMasterId) throws IOException {
         if (!isConfigured) {
-            throw new IllegalStateException("Google Cloud Storage is not configured");
+            throw new IllegalStateException(
+                "Google Cloud Storage is not properly configured. " +
+                "Please check logs for configuration errors and ensure:\n" +
+                "1. Credentials file exists at path specified in GCS_CREDENTIALS_PATH\n" +
+                "2. Service account has 'Storage Object Admin' or 'Storage Bucket Admin' role\n" +
+                "3. Bucket '" + bucketName + "' exists in Google Cloud Console\n" +
+                "4. All environment variables are set in .env file"
+            );
         }
 
         String folderPath = generateFolderPath(conferenceId, dashboardMasterId);
@@ -167,18 +286,23 @@ public class GoogleCloudStorageService {
 
         storage.create(blobInfo, file.getBytes());
 
-        String publicUrl = String.format("https://storage.googleapis.com/%s/%s", bucketName, blobName);
-        logger.info("File uploaded to GCS: {}", publicUrl);
+        // Generate signed URL with lifetime access (no expiration)
+        String signedUrl = generateSignedUrl(blobName);
+        logger.info("File uploaded to GCS with lifetime signed URL: {}", signedUrl);
 
-        return publicUrl;
+        return signedUrl;
     }
 
     /**
      * Upload file with custom filename
+     * @return Signed URL of the uploaded file (lifetime access, no expiration)
      */
     public String uploadFile(MultipartFile file, String conferenceId, String dashboardMasterId, String customFilename) throws IOException {
         if (!isConfigured) {
-            throw new IllegalStateException("Google Cloud Storage is not configured");
+            throw new IllegalStateException(
+                "Google Cloud Storage is not properly configured. " +
+                "Check logs and ensure service account has 'Storage Object Admin' role."
+            );
         }
 
         String folderPath = generateFolderPath(conferenceId, dashboardMasterId);
@@ -191,19 +315,56 @@ public class GoogleCloudStorageService {
 
         storage.create(blobInfo, file.getBytes());
 
-        String publicUrl = String.format("https://storage.googleapis.com/%s/%s", bucketName, blobName);
-        logger.info("File uploaded to GCS: {}", publicUrl);
+        // Generate signed URL with lifetime access (no expiration)
+        String signedUrl = generateSignedUrl(blobName);
+        logger.info("File uploaded to GCS with lifetime signed URL: {}", signedUrl);
 
-        return publicUrl;
+        return signedUrl;
+    }
+
+    /**
+     * Upload file to custom folder path (for conference documents)
+     * @param file File to upload
+     * @param customFolderPath Custom folder path (e.g., "conferences/tech-summit/2026/program/")
+     * @return Signed URL of uploaded file (lifetime access, no expiration)
+     */
+    public String uploadFile(MultipartFile file, String customFolderPath) throws IOException {
+        if (!isConfigured) {
+            throw new IllegalStateException(
+                "Google Cloud Storage is not properly configured. " +
+                "Check logs and ensure service account has 'Storage Object Admin' role."
+            );
+        }
+
+        String originalFilename = file.getOriginalFilename() != null ? file.getOriginalFilename() : "file";
+        String fileName = sanitizeFileName(originalFilename);
+        String blobName = customFolderPath + fileName;
+
+        BlobId blobId = BlobId.of(bucketName, blobName);
+        BlobInfo blobInfo = BlobInfo.newBuilder(blobId)
+            .setContentType(file.getContentType())
+            .build();
+
+        storage.create(blobInfo, file.getBytes());
+
+        // Generate signed URL with lifetime access (no expiration)
+        String signedUrl = generateSignedUrl(blobName);
+        logger.info("File uploaded to GCS with lifetime signed URL: {}", signedUrl);
+
+        return signedUrl;
     }
 
     /**
      * Upload file from InputStream
+     * @return Signed URL of uploaded file (lifetime access, no expiration)
      */
     public String uploadFile(InputStream inputStream, String conferenceId, String dashboardMasterId,
                              String filename, String contentType) throws IOException {
         if (!isConfigured) {
-            throw new IllegalStateException("Google Cloud Storage is not configured");
+            throw new IllegalStateException(
+                "Google Cloud Storage is not properly configured. " +
+                "Check logs and ensure service account has 'Storage Object Admin' role."
+            );
         }
 
         String folderPath = generateFolderPath(conferenceId, dashboardMasterId);
@@ -220,10 +381,11 @@ public class GoogleCloudStorageService {
 
         storage.create(blobInfo, inputStream.readAllBytes());
 
-        String publicUrl = String.format("https://storage.googleapis.com/%s/%s", bucketName, blobName);
-        logger.info("File uploaded to GCS: {}", publicUrl);
+        // Generate signed URL with lifetime access (no expiration)
+        String signedUrl = generateSignedUrl(blobName);
+        logger.info("File uploaded to GCS with lifetime signed URL: {}", signedUrl);
 
-        return publicUrl;
+        return signedUrl;
     }
 
     /**
@@ -231,7 +393,9 @@ public class GoogleCloudStorageService {
      */
     public byte[] downloadFile(String blobName) {
         if (!isConfigured) {
-            throw new IllegalStateException("Google Cloud Storage is not configured");
+            throw new IllegalStateException(
+                "Google Cloud Storage is not configured. Please check application logs for details."
+            );
         }
 
         BlobId blobId = BlobId.of(bucketName, blobName);
@@ -249,7 +413,9 @@ public class GoogleCloudStorageService {
      */
     public boolean deleteFile(String blobName) {
         if (!isConfigured) {
-            throw new IllegalStateException("Google Cloud Storage is not configured");
+            throw new IllegalStateException(
+                "Google Cloud Storage is not configured. Please check application logs for details."
+            );
         }
 
         BlobId blobId = BlobId.of(bucketName, blobName);
@@ -269,7 +435,9 @@ public class GoogleCloudStorageService {
      */
     public List<String> listFiles(String conferenceId, String dashboardMasterId) {
         if (!isConfigured) {
-            throw new IllegalStateException("Google Cloud Storage is not configured");
+            throw new IllegalStateException(
+                "Google Cloud Storage is not configured. Please check application logs for details."
+            );
         }
 
         String folderPath = generateFolderPath(conferenceId, dashboardMasterId);
@@ -290,7 +458,9 @@ public class GoogleCloudStorageService {
      */
     public String getSignedUrl(String blobName) {
         if (!isConfigured) {
-            throw new IllegalStateException("Google Cloud Storage is not configured");
+            throw new IllegalStateException(
+                "Google Cloud Storage is not configured. Please check application logs for details."
+            );
         }
 
         BlobId blobId = BlobId.of(bucketName, blobName);
@@ -320,6 +490,35 @@ public class GoogleCloudStorageService {
             return "";
         }
         return filename.substring(filename.lastIndexOf("."));
+    }
+
+    /**
+     * Sanitize file name (remove special characters, preserve extension)
+     */
+    private String sanitizeFileName(String filename) {
+        if (filename == null) return "file";
+
+        // Get extension
+        String extension = getFileExtension(filename);
+
+        // Remove extension from name
+        String nameWithoutExt = filename;
+        if (extension.length() > 0) {
+            nameWithoutExt = filename.substring(0, filename.lastIndexOf("."));
+        }
+
+        // Sanitize name
+        String sanitized = nameWithoutExt.toLowerCase()
+                .replaceAll("[^a-z0-9\\s-]", "")
+                .replaceAll("\\s+", "-")
+                .replaceAll("-+", "-")
+                .trim();
+
+        if (sanitized.isEmpty()) {
+            sanitized = "file";
+        }
+
+        return sanitized + extension;
     }
 
     /**
