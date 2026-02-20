@@ -21,22 +21,28 @@ public class ConferenceDocument {
     private String conferenceName;
 
     @Indexed
-    private Integer year; // e.g., 2026, 2027, 2028
+    private Integer year;
 
+    /**
+     * Slug of the document type — references DocumentTypeEntity.slug.
+     * e.g., "program", "book", "positive_sheets"
+     * Dynamic — managed by SUPER_ADMIN via /api/document-types.
+     */
     @Indexed
-    private DocumentType documentType; // PROGRAM, BOOK, POSITIVE_SHEETS
+    private String documentType;
+
+    /**
+     * Display name stored at upload time for fast retrieval without extra join.
+     * e.g., "Program", "Book"
+     */
+    private String documentTypeDisplayName;
 
     private String fileName;
-
-    private String blobName; // GCS blob name (exact path used in bucket, needed for download/delete)
-
-    private String filePath; // GCS path: conferences/{conference}/{year}/{documentType}/{fileName}
-
-    private String publicUrl; // GCS public URL
-
-    private Long fileSize; // in bytes
-
-    private String contentType; // e.g., application/pdf, application/vnd.ms-excel
+    private String blobName;    // GCS blob name (exact path in bucket — used for download/delete)
+    private String filePath;    // kept in sync with blobName
+    private String publicUrl;
+    private Long fileSize;
+    private String contentType;
 
     @CreatedDate
     private LocalDateTime uploadedAt;
@@ -45,158 +51,58 @@ public class ConferenceDocument {
     private LocalDateTime updatedAt;
 
     private String uploadedByUserId;
-
     private String uploadedByUserName;
-
     private boolean deleted = false;
 
-    public enum DocumentType {
-        PROGRAM("Program"),
-        BOOK("Book"),
-        POSITIVE_SHEETS("Positive Sheets");
+    // ─── Getters & Setters ───────────────────────────────────────────
+    public String getId() { return id; }
+    public void setId(String id) { this.id = id; }
 
-        private final String displayName;
+    public String getConferenceId() { return conferenceId; }
+    public void setConferenceId(String conferenceId) { this.conferenceId = conferenceId; }
 
-        DocumentType(String displayName) {
-            this.displayName = displayName;
-        }
+    public String getConferenceName() { return conferenceName; }
+    public void setConferenceName(String conferenceName) { this.conferenceName = conferenceName; }
 
-        public String getDisplayName() {
-            return displayName;
-        }
+    public Integer getYear() { return year; }
+    public void setYear(Integer year) { this.year = year; }
 
-        public String getFolderName() {
-            return this.name().toLowerCase().replace('_', '-');
-        }
-    }
+    public String getDocumentType() { return documentType; }
+    public void setDocumentType(String documentType) { this.documentType = documentType; }
 
-    // Getters and Setters
-    public String getId() {
-        return id;
-    }
+    public String getDocumentTypeDisplayName() { return documentTypeDisplayName; }
+    public void setDocumentTypeDisplayName(String documentTypeDisplayName) { this.documentTypeDisplayName = documentTypeDisplayName; }
 
-    public void setId(String id) {
-        this.id = id;
-    }
+    public String getFileName() { return fileName; }
+    public void setFileName(String fileName) { this.fileName = fileName; }
 
-    public String getConferenceId() {
-        return conferenceId;
-    }
+    public String getBlobName() { return blobName; }
+    public void setBlobName(String blobName) { this.blobName = blobName; }
 
-    public void setConferenceId(String conferenceId) {
-        this.conferenceId = conferenceId;
-    }
+    public String getFilePath() { return filePath; }
+    public void setFilePath(String filePath) { this.filePath = filePath; }
 
-    public String getConferenceName() {
-        return conferenceName;
-    }
+    public String getPublicUrl() { return publicUrl; }
+    public void setPublicUrl(String publicUrl) { this.publicUrl = publicUrl; }
 
-    public void setConferenceName(String conferenceName) {
-        this.conferenceName = conferenceName;
-    }
+    public Long getFileSize() { return fileSize; }
+    public void setFileSize(Long fileSize) { this.fileSize = fileSize; }
 
-    public Integer getYear() {
-        return year;
-    }
+    public String getContentType() { return contentType; }
+    public void setContentType(String contentType) { this.contentType = contentType; }
 
-    public void setYear(Integer year) {
-        this.year = year;
-    }
+    public LocalDateTime getUploadedAt() { return uploadedAt; }
+    public void setUploadedAt(LocalDateTime uploadedAt) { this.uploadedAt = uploadedAt; }
 
-    public DocumentType getDocumentType() {
-        return documentType;
-    }
+    public LocalDateTime getUpdatedAt() { return updatedAt; }
+    public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
 
-    public void setDocumentType(DocumentType documentType) {
-        this.documentType = documentType;
-    }
+    public String getUploadedByUserId() { return uploadedByUserId; }
+    public void setUploadedByUserId(String uploadedByUserId) { this.uploadedByUserId = uploadedByUserId; }
 
-    public String getFileName() {
-        return fileName;
-    }
+    public String getUploadedByUserName() { return uploadedByUserName; }
+    public void setUploadedByUserName(String uploadedByUserName) { this.uploadedByUserName = uploadedByUserName; }
 
-    public void setFileName(String fileName) {
-        this.fileName = fileName;
-    }
-
-    public String getBlobName() {
-        return blobName;
-    }
-
-    public void setBlobName(String blobName) {
-        this.blobName = blobName;
-    }
-
-    public String getFilePath() {
-        return filePath;
-    }
-
-    public void setFilePath(String filePath) {
-        this.filePath = filePath;
-    }
-
-    public String getPublicUrl() {
-        return publicUrl;
-    }
-
-    public void setPublicUrl(String publicUrl) {
-        this.publicUrl = publicUrl;
-    }
-
-    public Long getFileSize() {
-        return fileSize;
-    }
-
-    public void setFileSize(Long fileSize) {
-        this.fileSize = fileSize;
-    }
-
-    public String getContentType() {
-        return contentType;
-    }
-
-    public void setContentType(String contentType) {
-        this.contentType = contentType;
-    }
-
-    public LocalDateTime getUploadedAt() {
-        return uploadedAt;
-    }
-
-    public void setUploadedAt(LocalDateTime uploadedAt) {
-        this.uploadedAt = uploadedAt;
-    }
-
-    public LocalDateTime getUpdatedAt() {
-        return updatedAt;
-    }
-
-    public void setUpdatedAt(LocalDateTime updatedAt) {
-        this.updatedAt = updatedAt;
-    }
-
-    public String getUploadedByUserId() {
-        return uploadedByUserId;
-    }
-
-    public void setUploadedByUserId(String uploadedByUserId) {
-        this.uploadedByUserId = uploadedByUserId;
-    }
-
-    public String getUploadedByUserName() {
-        return uploadedByUserName;
-    }
-
-    public void setUploadedByUserName(String uploadedByUserName) {
-        this.uploadedByUserName = uploadedByUserName;
-    }
-
-    public boolean isDeleted() {
-        return deleted;
-    }
-
-    public void setDeleted(boolean deleted) {
-        this.deleted = deleted;
-    }
+    public boolean isDeleted() { return deleted; }
+    public void setDeleted(boolean deleted) { this.deleted = deleted; }
 }
-

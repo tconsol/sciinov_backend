@@ -12,7 +12,10 @@ import java.time.LocalDateTime;
 
 @Document(collection = "dashboard_data")
 @CompoundIndexes({
-    @CompoundIndex(name = "conf_dash_email_idx", def = "{'conferenceId': 1, 'dashboardMasterId': 1, 'email': 1}", unique = true)
+    @CompoundIndex(name = "conf_dash_email_idx", def = "{'conferenceId': 1, 'dashboardMasterId': 1, 'email': 1}", unique = true),
+    @CompoundIndex(name = "conf_dash_serial_idx", def = "{'conferenceId': 1, 'dashboardMasterId': 1, 'serialNo': 1}"),
+    @CompoundIndex(name = "conf_dash_created_idx", def = "{'conferenceId': 1, 'dashboardMasterId': 1, 'createdAt': 1}"),
+    @CompoundIndex(name = "conf_dash_deleted_idx", def = "{'conferenceId': 1, 'dashboardMasterId': 1, 'deleted': 1}")
 })
 public class DashboardData {
     @Id

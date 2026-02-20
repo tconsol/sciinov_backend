@@ -14,6 +14,7 @@ import java.util.List;
 /**
  * Service for conference document audit logs.
  * Completely separate from AdminActivityLog (dashboard data logs).
+ * Every save is also pushed to SSE subscribers via LogSseService.
  */
 @Service
 public class ConferenceDocumentLogService {
@@ -21,6 +22,9 @@ public class ConferenceDocumentLogService {
 
     @Autowired
     private ConferenceDocumentLogRepository logRepository;
+
+    @Autowired
+    private LogSseService logSseService;
 
     // ── Log a document action ─────────────────────────────────────────
 
@@ -37,17 +41,19 @@ public class ConferenceDocumentLogService {
             entry.setConferenceName(doc.getConferenceName());
             entry.setDocumentId(doc.getId());
             entry.setFileName(doc.getFileName());
-            entry.setDocumentType(doc.getDocumentType() != null ? doc.getDocumentType().name() : null);
+            entry.setDocumentType(doc.getDocumentType());
             entry.setYear(doc.getYear());
             entry.setDescription(buildDescription(actionType, doc));
             entry.setCreatedAt(LocalDateTime.now());
-            logRepository.save(entry);
+            ConferenceDocumentLog saved = logRepository.save(entry);
+            // Push to SSE in real-time
+            logSseService.pushDocLog(adminId, saved);
         } catch (Exception e) {
             logger.error("Failed to save conference document log: {}", e.getMessage());
         }
     }
 
-    /** Log a VIEW/list action (no specific document, just listing) */
+    /** Log a VIEW/list action (no specific document) */
     public void logView(String adminId, String adminName, String ipAddress,
                         String conferenceId, String conferenceName, String detail) {
         try {
@@ -60,7 +66,8 @@ public class ConferenceDocumentLogService {
             entry.setConferenceName(conferenceName);
             entry.setDescription("Viewed documents" + (detail != null ? " | " + detail : ""));
             entry.setCreatedAt(LocalDateTime.now());
-            logRepository.save(entry);
+            ConferenceDocumentLog saved = logRepository.save(entry);
+            logSseService.pushDocLog(adminId, saved);
         } catch (Exception e) {
             logger.error("Failed to save conference document view log: {}", e.getMessage());
         }
@@ -83,12 +90,12 @@ public class ConferenceDocumentLogService {
         return logRepository.findAllByOrderByCreatedAtDesc();
     }
 
-    /** Super Admin: all logs for a specific admin, latest first */
+    /** Super Admin: logs for a specific admin, latest first */
     public List<ConferenceDocumentLog> getLogsByAdmin(String adminId) {
         return logRepository.findByAdminIdOrderByCreatedAtDesc(adminId);
     }
 
-    /** Super Admin: all logs for a specific conference, latest first */
+    /** Super Admin: logs for a specific conference, latest first */
     public List<ConferenceDocumentLog> getLogsByConference(String conferenceId) {
         return logRepository.findByConferenceIdOrderByCreatedAtDesc(conferenceId);
     }
@@ -96,7 +103,9 @@ public class ConferenceDocumentLogService {
     // ── Helper ────────────────────────────────────────────────────────
 
     private String buildDescription(ConferenceDocumentLog.ActionType actionType, ConferenceDocument doc) {
-        String typeName = doc.getDocumentType() != null ? doc.getDocumentType().getDisplayName() : "Unknown";
+        String typeName = doc.getDocumentTypeDisplayName() != null
+                ? doc.getDocumentTypeDisplayName()
+                : (doc.getDocumentType() != null ? doc.getDocumentType() : "Unknown");
         String fileName = doc.getFileName() != null ? doc.getFileName() : "";
         int year = doc.getYear() != null ? doc.getYear() : 0;
         String conf = doc.getConferenceName() != null ? doc.getConferenceName() : doc.getConferenceId();
@@ -108,4 +117,3 @@ public class ConferenceDocumentLogService {
         }
     }
 }
-

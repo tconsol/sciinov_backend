@@ -12,10 +12,10 @@ import java.util.Optional;
 public interface ConferenceDocumentRepository extends MongoRepository<ConferenceDocument, String> {
 
     /**
-     * Find document by conference, year, and type
+     * Find document by conference, year, and type slug
      */
     Optional<ConferenceDocument> findByConferenceIdAndYearAndDocumentTypeAndDeletedFalse(
-            String conferenceId, Integer year, ConferenceDocument.DocumentType documentType);
+            String conferenceId, Integer year, String documentType);
 
     /**
      * Find all documents for a specific conference
@@ -33,16 +33,15 @@ public interface ConferenceDocumentRepository extends MongoRepository<Conference
     List<ConferenceDocument> findByConferenceIdAndYearAndDeletedFalseOrderByDocumentTypeAsc(String conferenceId, Integer year);
 
     /**
-     * Find documents for a specific conference and document type
+     * Find documents for a specific conference and document type slug
      */
     List<ConferenceDocument> findByConferenceIdAndDocumentTypeAndDeletedFalseOrderByYearDesc(
-            String conferenceId, ConferenceDocument.DocumentType documentType);
+            String conferenceId, String documentType);
 
     /**
-     * Find documents of a specific type across all conferences
+     * Find documents of a specific type slug across all conferences
      */
-    List<ConferenceDocument> findByDocumentTypeAndDeletedFalseOrderByConferenceNameAscYearDesc(
-            ConferenceDocument.DocumentType documentType);
+    List<ConferenceDocument> findByDocumentTypeAndDeletedFalseOrderByConferenceNameAscYearDesc(String documentType);
 
     /**
      * Find all years available for a conference
@@ -56,10 +55,10 @@ public interface ConferenceDocumentRepository extends MongoRepository<Conference
     List<ConferenceDocument> findByConferenceNameAndDeletedFalseOrderByYearDescUpdatedAtDesc(String conferenceName);
 
     /**
-     * Check if document exists for given conference, year, and type
+     * Check if document exists for given conference, year, and type slug
      */
     boolean existsByConferenceIdAndYearAndDocumentTypeAndDeletedFalse(
-            String conferenceId, Integer year, ConferenceDocument.DocumentType documentType);
+            String conferenceId, Integer year, String documentType);
 
     /**
      * Count documents for a conference
@@ -70,5 +69,9 @@ public interface ConferenceDocumentRepository extends MongoRepository<Conference
      * Count documents for a specific year
      */
     long countByYearAndDeletedFalse(Integer year);
-}
 
+    /**
+     * Find all documents for a list of conferenceIds
+     */
+    List<ConferenceDocument> findByConferenceIdInAndDeletedFalseOrderByYearDescUpdatedAtDesc(List<String> conferenceIds);
+}

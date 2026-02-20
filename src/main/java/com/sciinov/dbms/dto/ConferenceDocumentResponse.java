@@ -30,8 +30,8 @@ public class ConferenceDocumentResponse {
         this.conferenceId = doc.getConferenceId();
         this.conferenceName = doc.getConferenceName();
         this.year = doc.getYear();
-        this.documentType = doc.getDocumentType().name();
-        this.documentTypeDisplayName = doc.getDocumentType().getDisplayName();
+        this.documentType = doc.getDocumentType();                       // slug e.g. "program"
+        this.documentTypeDisplayName = doc.getDocumentTypeDisplayName(); // e.g. "Program"
         this.fileName = doc.getFileName();
         this.blobName = doc.getBlobName();
         this.filePath = doc.getFilePath();

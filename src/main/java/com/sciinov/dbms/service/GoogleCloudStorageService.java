@@ -1,6 +1,7 @@
 package com.sciinov.dbms.service;
 
 import com.google.auth.oauth2.GoogleCredentials;
+import com.google.auth.oauth2.ServiceAccountCredentials;
 import com.google.cloud.storage.*;
 import com.google.api.gax.paging.Page;
 import com.sciinov.dbms.entity.Conference;
@@ -15,12 +16,10 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.FileInputStream;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -40,8 +39,35 @@ public class GoogleCloudStorageService {
     @Value("${gcs.bucket-name}")
     private String bucketName;
 
-    @Value("${gcs.credentials-path}")
-    private String credentialsPath;
+    @Value("${gcs.type:}")
+    private String gcsType;
+
+    @Value("${gcs.private-key-id:}")
+    private String privateKeyId;
+
+    @Value("${gcs.private-key:}")
+    private String privateKey;
+
+    @Value("${gcs.client-email:}")
+    private String clientEmail;
+
+    @Value("${gcs.client-id:}")
+    private String clientId;
+
+    @Value("${gcs.auth-uri:}")
+    private String authUri;
+
+    @Value("${gcs.token-uri:}")
+    private String tokenUri;
+
+    @Value("${gcs.auth-provider-x509-cert-url:}")
+    private String authProviderX509CertUrl;
+
+    @Value("${gcs.client-x509-cert-url:}")
+    private String clientX509CertUrl;
+
+    @Value("${gcs.universe-domain:}")
+    private String universeDomain;
 
     @Autowired
     private ConferenceRepository conferenceRepository;
@@ -55,57 +81,100 @@ public class GoogleCloudStorageService {
     @PostConstruct
     public void init() {
         try {
-            if (credentialsPath != null && !credentialsPath.isEmpty() &&
-                projectId != null && !projectId.isEmpty()) {
-
-                Path path = Path.of(credentialsPath);
-                if (Files.exists(path)) {
-                    try {
-                        GoogleCredentials credentials = GoogleCredentials.fromStream(
-                            new FileInputStream(credentialsPath)
-                        );
-
-                        storage = StorageOptions.newBuilder()
-                            .setProjectId(projectId)
-                            .setCredentials(credentials)
-                            .build()
-                            .getService();
-
-                        logger.info("Google Cloud Storage credentials loaded successfully for project: {}", projectId);
-
-                        // Ensure bucket exists - non-blocking
-                        ensureBucketExists();
-
-                        if (isConfigured) {
-                            logger.info("✅ GCS READY: All systems operational");
-                        } else {
-                            logger.warn("⚠️  GCS DEGRADED: Credentials valid but bucket access failed. " +
-                                "Upload features disabled. Check IAM permissions on service account.");
-                        }
-                    } catch (Exception authErr) {
-                        logger.warn("❌ GCS AUTHENTICATION FAILED: {}. " +
-                            "Credentials file at '{}' may be invalid. Application will continue without GCS.",
-                            authErr.getMessage(), credentialsPath);
-                        isConfigured = false;
-                        storage = null;
-                    }
-                } else {
-                    logger.warn("❌ GCS DISABLED: Credentials file not found at '{}'. " +
-                        "File upload features will be unavailable. Please place credentials file in project root.",
-                        credentialsPath);
-                    isConfigured = false;
-                }
-            } else {
-                logger.warn("❌ GCS DISABLED: Configuration incomplete in .env file. " +
-                    "Required: GCS_PROJECT_ID={}, GCS_CREDENTIALS_PATH={}, GCS_BUCKET_NAME={}",
-                    projectId, credentialsPath, bucketName);
+            // Validate required configuration
+            if (projectId == null || projectId.isEmpty()) {
+                logger.warn("❌ GCS DISABLED: GCS_PROJECT_ID not configured");
                 isConfigured = false;
+                return;
+            }
+
+            if (bucketName == null || bucketName.isEmpty()) {
+                logger.warn("❌ GCS DISABLED: GCS_BUCKET_NAME not configured");
+                isConfigured = false;
+                return;
+            }
+
+            try {
+                // Build credentials from .env variables
+                GoogleCredentials credentials = createCredentialsFromEnv();
+
+                storage = StorageOptions.newBuilder()
+                    .setProjectId(projectId)
+                    .setCredentials(credentials)
+                    .build()
+                    .getService();
+
+                logger.info("✅ Google Cloud Storage initialized for project: {}", projectId);
+
+                // Ensure bucket exists
+                ensureBucketExists();
+
+                if (isConfigured) {
+                    logger.info("✅ GCS READY: All systems operational");
+                } else {
+                    logger.warn("⚠️ GCS DEGRADED: Bucket '{}' access failed. Check IAM permissions on service account.", bucketName);
+                }
+            } catch (IOException e) {
+                logger.error("❌ GCS AUTHENTICATION FAILED: {}", e.getMessage());
+                logger.warn("⚠️ Ensure all GCS_* environment variables are set in .env file");
+                isConfigured = false;
+                storage = null;
             }
         } catch (Exception e) {
-            logger.error("❌ GCS INITIALIZATION ERROR: Unexpected error during setup: {}", e.getMessage());
+            logger.error("❌ GCS INITIALIZATION ERROR: {}", e.getMessage());
             isConfigured = false;
             storage = null;
         }
+    }
+
+    /**
+     * Create GoogleCredentials from environment variables
+     */
+    private GoogleCredentials createCredentialsFromEnv() throws IOException {
+        // Check if all required credentials are present in .env
+        if (privateKey == null || privateKey.isEmpty() ||
+            clientEmail == null || clientEmail.isEmpty() ||
+            projectId == null || projectId.isEmpty()) {
+
+            logger.error("❌ Missing required GCS credentials in .env file");
+            logger.error("Required: GCS_PRIVATE_KEY, GCS_CLIENT_EMAIL, GCS_PROJECT_ID");
+            throw new IOException("GCS credentials not configured in .env");
+        }
+
+        // Build JSON credentials string from environment variables
+        String credentialsJson = String.format(
+            "{" +
+            "\"type\":\"%s\"," +
+            "\"project_id\":\"%s\"," +
+            "\"private_key_id\":\"%s\"," +
+            "\"private_key\":\"%s\"," +
+            "\"client_email\":\"%s\"," +
+            "\"client_id\":\"%s\"," +
+            "\"auth_uri\":\"%s\"," +
+            "\"token_uri\":\"%s\"," +
+            "\"auth_provider_x509_cert_url\":\"%s\"," +
+            "\"client_x509_cert_url\":\"%s\"," +
+            "\"universe_domain\":\"%s\"" +
+            "}",
+            gcsType != null ? gcsType : "service_account",
+            projectId,
+            privateKeyId != null ? privateKeyId : "",
+            privateKey,  // Contains literal \n from .env
+            clientEmail,
+            clientId != null ? clientId : "",
+            authUri != null ? authUri : "https://accounts.google.com/o/oauth2/auth",
+            tokenUri != null ? tokenUri : "https://oauth2.googleapis.com/token",
+            authProviderX509CertUrl != null ? authProviderX509CertUrl : "https://www.googleapis.com/oauth2/v1/certs",
+            clientX509CertUrl != null ? clientX509CertUrl : "",
+            universeDomain != null ? universeDomain : "googleapis.com"
+        );
+
+        // Parse credentials from JSON string
+        InputStream credentialsStream = new ByteArrayInputStream(credentialsJson.getBytes());
+        GoogleCredentials credentials = ServiceAccountCredentials.fromStream(credentialsStream);
+
+        logger.info("✅ GCS credentials loaded from .env variables for: {}", clientEmail);
+        return credentials;
     }
 
     /**
