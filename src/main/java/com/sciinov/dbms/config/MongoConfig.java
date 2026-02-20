@@ -2,6 +2,7 @@ package com.sciinov.dbms.config;
 
 import com.sciinov.dbms.entity.User;
 import com.sciinov.dbms.repository.UserRepository;
+import com.sciinov.dbms.service.DocumentTypeService;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -13,8 +14,11 @@ import java.time.LocalDateTime;
 public class MongoConfig {
 
     @Bean
-    CommandLineRunner initDatabase(UserRepository userRepository, PasswordEncoder passwordEncoder) {
+    CommandLineRunner initDatabase(UserRepository userRepository,
+                                   PasswordEncoder passwordEncoder,
+                                   DocumentTypeService documentTypeService) {
         return args -> {
+            // ── Seed default super admin ──────────────────────────────
             if (!userRepository.existsByRoleAndDeletedFalse(User.Role.SUPER_ADMIN)) {
                 User superAdmin = new User();
                 superAdmin.setFirstName("Super");
@@ -27,10 +31,12 @@ public class MongoConfig {
                 superAdmin.setStatus(true);
                 superAdmin.setCreatedAt(LocalDateTime.now());
                 superAdmin.setUpdatedAt(LocalDateTime.now());
-                
                 userRepository.save(superAdmin);
-                System.out.println("Default Super Admin created: superadmin / admin123");
+                System.out.println("✅ Default Super Admin created: superadmin / admin123");
             }
+
+            // ── Seed default document types ───────────────────────────
+            documentTypeService.seedDefaultTypes();
         };
     }
 }

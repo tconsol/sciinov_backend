@@ -24,6 +24,9 @@ public class AnalyticsService {
     @Autowired
     private UserRepository userRepository;
 
+    @Autowired
+    private LogSseService logSseService;
+
     // ── Upload Stats ──────────────────────────────────────────────────
 
     public List<DashboardUploadStats> getUploadStatsByAdmin(String adminId) {
@@ -45,23 +48,34 @@ public class AnalyticsService {
     // ── Activity Logs ─────────────────────────────────────────────────
 
     public List<AdminActivityLog> getActivityLogsByAdmin(String adminId) {
-        List<AdminActivityLog> logs = adminActivityLogRepository.findByAdminIdOrderByCreatedAtDesc(adminId);
-        return populateAdminNames(logs);
+        return populateAdminNames(adminActivityLogRepository.findByAdminIdOrderByCreatedAtDesc(adminId));
     }
 
     public List<AdminActivityLog> getAllActivityLogs() {
-        List<AdminActivityLog> logs = adminActivityLogRepository.findAllByOrderByCreatedAtDesc();
-        return populateAdminNames(logs);
+        return populateAdminNames(adminActivityLogRepository.findAllByOrderByCreatedAtDesc());
     }
 
     public List<AdminActivityLog> getActivityLogsByConference(String conferenceId) {
-        List<AdminActivityLog> logs = adminActivityLogRepository.findByConferenceIdOrderByCreatedAtDesc(conferenceId);
-        return populateAdminNames(logs);
+        return populateAdminNames(adminActivityLogRepository.findByConferenceIdOrderByCreatedAtDesc(conferenceId));
     }
 
     public List<AdminActivityLog> getActivityLogsByAdminAndConference(String adminId, String conferenceId) {
-        List<AdminActivityLog> logs = adminActivityLogRepository.findByAdminIdAndConferenceIdOrderByCreatedAtDesc(adminId, conferenceId);
-        return populateAdminNames(logs);
+        return populateAdminNames(adminActivityLogRepository.findByAdminIdAndConferenceIdOrderByCreatedAtDesc(adminId, conferenceId));
+    }
+
+    /**
+     * Save a log entry and immediately push it to all SSE subscribers in real-time.
+     * Called by ExportService, ExcelService, ConferenceDocumentService after every admin action.
+     */
+    public AdminActivityLog saveAndPushLog(AdminActivityLog log) {
+        if (log.getAdminName() == null && log.getAdminId() != null) {
+            userRepository.findById(log.getAdminId())
+                .ifPresent(u -> log.setAdminName(u.getFirstName() + " " + u.getLastName()));
+        }
+        AdminActivityLog saved = adminActivityLogRepository.save(log);
+        // Push to SSE — super admin gets it, admin gets their own
+        logSseService.pushDataLog(saved.getAdminId(), saved);
+        return saved;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────
@@ -70,7 +84,7 @@ public class AnalyticsService {
         for (AdminActivityLog log : logs) {
             if (log.getAdminName() == null && log.getAdminId() != null) {
                 Optional<User> admin = userRepository.findById(log.getAdminId());
-                admin.ifPresent(user -> log.setAdminName(user.getFirstName() + " " + user.getLastName()));
+                admin.ifPresent(u -> log.setAdminName(u.getFirstName() + " " + u.getLastName()));
             }
         }
         return logs;

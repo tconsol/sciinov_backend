@@ -92,16 +92,8 @@ public class ConferenceDocumentController {
                 return ResponseEntity.badRequest().body(Map.of("success", false, "message", "File is empty"));
             }
 
-            ConferenceDocument.DocumentType type;
-            try {
-                type = ConferenceDocument.DocumentType.valueOf(documentType.toUpperCase());
-            } catch (IllegalArgumentException e) {
-                return ResponseEntity.badRequest().body(Map.of(
-                    "success", false,
-                    "message", "Invalid document type. Must be: PROGRAM, BOOK, or POSITIVE_SHEETS",
-                    "validTypes", List.of("PROGRAM", "BOOK", "POSITIVE_SHEETS")
-                ));
-            }
+            // Normalise to lowercase slug (e.g., "PROGRAM" → "program", "Positive Sheets" → "positive_sheets")
+            String typeSlug = documentType.trim().toLowerCase().replace(' ', '_').replace('-', '_');
 
             int currentYear = java.time.Year.now().getValue();
             if (year < 2000 || year > currentYear + 10) {
@@ -112,7 +104,7 @@ public class ConferenceDocumentController {
             }
 
             ConferenceDocument doc = conferenceDocumentService.uploadDocument(
-                conferenceId, year, type, file, userId, userName, ipAddress);
+                conferenceId, year, typeSlug, file, userId, userName, ipAddress);
 
             return ResponseEntity.ok(Map.of(
                 "success", true,
@@ -231,13 +223,13 @@ public class ConferenceDocumentController {
             @RequestParam String documentType) {
         try {
             validateConferenceAccess(conferenceId);
-            ConferenceDocument.DocumentType type = ConferenceDocument.DocumentType.valueOf(documentType.toUpperCase());
-            List<ConferenceDocument> docs = conferenceDocumentService.getDocumentsByType(conferenceId, type);
+            String typeSlug = documentType.trim().toLowerCase().replace(' ', '_').replace('-', '_');
+            List<ConferenceDocument> docs = conferenceDocumentService.getDocumentsByType(conferenceId, typeSlug);
             List<ConferenceDocumentResponse> responses = docs.stream().map(ConferenceDocumentResponse::new).toList();
             return ResponseEntity.ok(Map.of(
                 "success", true,
                 "conferenceId", conferenceId,
-                "documentType", type.getDisplayName(),
+                "documentType", typeSlug,
                 "totalDocuments", responses.size(),
                 "data", responses
             ));
@@ -274,17 +266,11 @@ public class ConferenceDocumentController {
                 validateConferenceAccess(conferenceId);
             }
 
-            ConferenceDocument.DocumentType type = null;
-            if (documentType != null && !documentType.isEmpty()) {
-                try {
-                    type = ConferenceDocument.DocumentType.valueOf(documentType.toUpperCase());
-                } catch (IllegalArgumentException e) {
-                    return ResponseEntity.badRequest().body(Map.of("success", false, "message", "Invalid document type"));
-                }
-            }
+            String typeSlug = (documentType != null && !documentType.isEmpty())
+                ? documentType.trim().toLowerCase().replace(' ', '_').replace('-', '_') : null;
 
             Page<ConferenceDocument> page = conferenceDocumentService.getDocumentsWithFilter(
-                conferenceId, conferenceName, year, type, pageNumber, pageSize);
+                conferenceId, conferenceName, year, typeSlug, pageNumber, pageSize);
             List<ConferenceDocumentResponse> responses = page.getContent().stream()
                 .map(ConferenceDocumentResponse::new).toList();
 

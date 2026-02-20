@@ -1,6 +1,7 @@
 package com.sciinov.dbms.repository;
 
 import com.sciinov.dbms.entity.DashboardData;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.repository.MongoRepository;
 import org.springframework.data.mongodb.repository.Query;
@@ -13,19 +14,26 @@ import java.util.Optional;
 @Repository
 public interface DashboardDataRepository extends MongoRepository<DashboardData, String> {
     Optional<DashboardData> findByConferenceIdAndDashboardMasterIdAndEmail(String conferenceId, String dashboardMasterId, String email);
-    
+
+    // Legacy (Sort-based) — kept for backward compat
     List<DashboardData> findByConferenceIdAndDashboardMasterIdAndSerialNoBetween(
             String conferenceId, String dashboardMasterId, Long fromSerialNo, Long toSerialNo, Sort sort);
-            
+
+    // Paginated + deleted=false — used by new controller
+    List<DashboardData> findByConferenceIdAndDashboardMasterIdAndSerialNoBetweenAndDeletedFalse(
+            String conferenceId, String dashboardMasterId, Long fromSerialNo, Long toSerialNo, Pageable pageable);
+
+    long countByConferenceIdAndDashboardMasterIdAndSerialNoBetweenAndDeletedFalse(
+            String conferenceId, String dashboardMasterId, Long fromSerialNo, Long toSerialNo);
+
     long countByConferenceIdAndDashboardMasterId(String conferenceId, String dashboardMasterId);
-    
+
     Optional<DashboardData> findTopByConferenceIdAndDashboardMasterIdOrderBySerialNoDesc(String conferenceId, String dashboardMasterId);
 
-    // Date-specific queries - filter by upload date range
+    // Date-specific queries
     List<DashboardData> findByConferenceIdAndDashboardMasterIdAndCreatedAtBetween(
             String conferenceId, String dashboardMasterId, LocalDateTime startDate, LocalDateTime endDate, Sort sort);
 
-    // Serial number range + Date filter
     @Query("{'conferenceId': ?0, 'dashboardMasterId': ?1, 'serialNo': {$gte: ?2, $lte: ?3}, 'createdAt': {$gte: ?4, $lte: ?5}}")
     List<DashboardData> findByConferenceAndSerialRangeAndDateRange(
             String conferenceId, String dashboardMasterId, Long fromSerialNo, Long toSerialNo,

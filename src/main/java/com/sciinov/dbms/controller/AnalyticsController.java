@@ -6,13 +6,16 @@ import com.sciinov.dbms.entity.DashboardUploadStats;
 import com.sciinov.dbms.security.UserDetailsImpl;
 import com.sciinov.dbms.service.AnalyticsService;
 import com.sciinov.dbms.service.ConferenceDocumentLogService;
+import com.sciinov.dbms.service.LogSseService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 import java.util.Map;
@@ -29,8 +32,61 @@ public class AnalyticsController {
     @Autowired
     private ConferenceDocumentLogService conferenceDocumentLogService;
 
+    @Autowired
+    private LogSseService logSseService;
+
     private UserDetailsImpl getCurrentUser() {
         return (UserDetailsImpl) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // SSE — Real-time Log Streaming (no page refresh needed)
+    // ═══════════════════════════════════════════════════════════════════
+
+    /**
+     * SUPER_ADMIN: Subscribe to ALL real-time log events (data logs + doc logs).
+     *
+     * Frontend usage:
+     *   const es = new EventSource('/api/analytics/stream?token=<JWT>');
+     *   es.addEventListener('data-log', e => { const log = JSON.parse(e.data); ... });
+     *   es.addEventListener('doc-log',  e => { const log = JSON.parse(e.data); ... });
+     *   es.addEventListener('connected', e => console.log('connected'));
+     *
+     * GET /api/analytics/stream
+     */
+    @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public SseEmitter streamAllLogs() {
+        logger.info("SUPER_ADMIN subscribed to real-time log stream");
+        return logSseService.subscribeSuperAdmin();
+    }
+
+    /**
+     * ADMIN: Subscribe to their own real-time log events only.
+     *
+     * Frontend usage (admin dashboard):
+     *   const es = new EventSource('/api/analytics/stream/me?token=<JWT>');
+     *   es.addEventListener('data-log', e => { ... });
+     *   es.addEventListener('doc-log',  e => { ... });
+     *
+     * GET /api/analytics/stream/me
+     */
+    @GetMapping(value = "/stream/me", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
+    public SseEmitter streamMyLogs() {
+        String adminId = getCurrentUser().getId();
+        logger.info("ADMIN {} subscribed to own real-time log stream", adminId);
+        return logSseService.subscribeAdmin(adminId);
+    }
+
+    /**
+     * Health check — returns number of active SSE connections.
+     * GET /api/analytics/stream/connections
+     */
+    @GetMapping("/stream/connections")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public ResponseEntity<?> getConnectionStats() {
+        return ResponseEntity.ok(logSseService.getConnectionStats());
     }
 
     // ── ADMIN: own upload stats ───────────────────────────────────────

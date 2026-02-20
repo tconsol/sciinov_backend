@@ -41,15 +41,18 @@ import java.util.stream.Collectors;
 public class ExportService {
     @Autowired
     private DashboardDataRepository dashboardDataRepository;
-    
+
     @Autowired
     private AdminActivityLogRepository adminActivityLogRepository;
-    
+
     @Autowired
     private UserRepository userRepository;
 
     @Autowired
     private MongoTemplate mongoTemplate;
+
+    @Autowired
+    private AnalyticsService analyticsService;
 
     // Original method - kept for backward compatibility
     public void exportToExcel(HttpServletResponse response, String conferenceId, String dashboardMasterId, Long fromSerialNo, Long toSerialNo) throws IOException {
@@ -97,50 +100,50 @@ public class ExportService {
      * Get filtered data based on multiple criteria using dynamic query building
      */
     public List<DashboardData> getFilteredData(ExportFilterRequest filterRequest) {
-        Query query = new Query();
+        Query query = buildFilterQuery(filterRequest);
+        query.with(Sort.by(Sort.Direction.ASC, "serialNo"));
+        return mongoTemplate.find(query, DashboardData.class);
+    }
 
-        // Required filters
+    /**
+     * Efficient count of filtered data using MongoDB count query (no data fetch).
+     */
+    public long countFilteredData(ExportFilterRequest filterRequest) {
+        Query query = buildFilterQuery(filterRequest);
+        return mongoTemplate.count(query, DashboardData.class);
+    }
+
+    /**
+     * Build a reusable Criteria query from filter request.
+     */
+    private Query buildFilterQuery(ExportFilterRequest filterRequest) {
+        Query query = new Query();
         query.addCriteria(Criteria.where("conferenceId").is(filterRequest.getConferenceId()));
         query.addCriteria(Criteria.where("dashboardMasterId").is(filterRequest.getDashboardMasterId()));
         query.addCriteria(Criteria.where("deleted").is(false));
 
-        // Serial number range filter
         if (filterRequest.getFromSerialNo() != null && filterRequest.getToSerialNo() != null) {
             query.addCriteria(Criteria.where("serialNo")
                     .gte(filterRequest.getFromSerialNo())
                     .lte(filterRequest.getToSerialNo()));
         }
 
-        // Date range filter (for upload/created date)
         if (filterRequest.getStartDate() != null && filterRequest.getEndDate() != null) {
-            LocalDateTime startDateTime = filterRequest.getStartDate().atStartOfDay();
-            LocalDateTime endDateTime = filterRequest.getEndDate().atTime(LocalTime.MAX);
             query.addCriteria(Criteria.where("createdAt")
-                    .gte(startDateTime)
-                    .lte(endDateTime));
+                    .gte(filterRequest.getStartDate().atStartOfDay())
+                    .lte(filterRequest.getEndDate().atTime(LocalTime.MAX)));
         } else if (filterRequest.getStartDate() != null) {
-            LocalDateTime startDateTime = filterRequest.getStartDate().atStartOfDay();
-            query.addCriteria(Criteria.where("createdAt").gte(startDateTime));
+            query.addCriteria(Criteria.where("createdAt").gte(filterRequest.getStartDate().atStartOfDay()));
         } else if (filterRequest.getEndDate() != null) {
-            LocalDateTime endDateTime = filterRequest.getEndDate().atTime(LocalTime.MAX);
-            query.addCriteria(Criteria.where("createdAt").lte(endDateTime));
+            query.addCriteria(Criteria.where("createdAt").lte(filterRequest.getEndDate().atTime(LocalTime.MAX)));
         }
 
-
-
-        // Email domain filter (e.g., "gmail.com" matches "user@gmail.com")
         if (filterRequest.getEmailDomain() != null && !filterRequest.getEmailDomain().isEmpty()) {
             String domainPattern = "@" + filterRequest.getEmailDomain().trim().toLowerCase();
             query.addCriteria(Criteria.where("email").regex(domainPattern, "i"));
         }
-
-        // Sort by serial number
-        query.with(Sort.by(Sort.Direction.ASC, "serialNo"));
-
-        return mongoTemplate.find(query, DashboardData.class);
+        return query;
     }
-
-    /**
 
 
     /**
@@ -337,7 +340,8 @@ public class ExportService {
 
         log.setCreatedAt(LocalDateTime.now());
         log.setIpAddress("127.0.0.1");
-        adminActivityLogRepository.save(log);
+        // Save + push to SSE subscribers in real-time
+        analyticsService.saveAndPushLog(log);
     }
 
     /**
