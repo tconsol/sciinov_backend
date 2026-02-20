@@ -15,12 +15,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -40,7 +37,7 @@ public class GoogleCloudStorageService {
     @Value("${gcs.bucket-name}")
     private String bucketName;
 
-    @Value("${gcs.credentials-path}")
+    @Value("${gcs.credentials-path:}")
     private String credentialsPath;
 
     @Autowired
@@ -55,54 +52,54 @@ public class GoogleCloudStorageService {
     @PostConstruct
     public void init() {
         try {
-            if (credentialsPath != null && !credentialsPath.isEmpty() &&
-                projectId != null && !projectId.isEmpty()) {
-
-                Path path = Path.of(credentialsPath);
-                if (Files.exists(path)) {
-                    try {
-                        GoogleCredentials credentials = GoogleCredentials.fromStream(
-                            new FileInputStream(credentialsPath)
-                        );
-
-                        storage = StorageOptions.newBuilder()
-                            .setProjectId(projectId)
-                            .setCredentials(credentials)
-                            .build()
-                            .getService();
-
-                        logger.info("Google Cloud Storage credentials loaded successfully for project: {}", projectId);
-
-                        // Ensure bucket exists - non-blocking
-                        ensureBucketExists();
-
-                        if (isConfigured) {
-                            logger.info("✅ GCS READY: All systems operational");
-                        } else {
-                            logger.warn("⚠️  GCS DEGRADED: Credentials valid but bucket access failed. " +
-                                "Upload features disabled. Check IAM permissions on service account.");
-                        }
-                    } catch (Exception authErr) {
-                        logger.warn("❌ GCS AUTHENTICATION FAILED: {}. " +
-                            "Credentials file at '{}' may be invalid. Application will continue without GCS.",
-                            authErr.getMessage(), credentialsPath);
-                        isConfigured = false;
-                        storage = null;
-                    }
-                } else {
-                    logger.warn("❌ GCS DISABLED: Credentials file not found at '{}'. " +
-                        "File upload features will be unavailable. Please place credentials file in project root.",
-                        credentialsPath);
-                    isConfigured = false;
-                }
-            } else {
-                logger.warn("❌ GCS DISABLED: Configuration incomplete in .env file. " +
-                    "Required: GCS_PROJECT_ID={}, GCS_CREDENTIALS_PATH={}, GCS_BUCKET_NAME={}",
-                    projectId, credentialsPath, bucketName);
+            // Validate required configuration
+            if (projectId == null || projectId.isEmpty()) {
+                logger.warn("❌ GCS DISABLED: GCS_PROJECT_ID not configured");
                 isConfigured = false;
+                return;
+            }
+
+            if (bucketName == null || bucketName.isEmpty()) {
+                logger.warn("❌ GCS DISABLED: GCS_BUCKET_NAME not configured");
+                isConfigured = false;
+                return;
+            }
+
+            try {
+                // Use Application Default Credentials (ADC)
+                // Works in:
+                // - Cloud Run (uses attached service account via metadata server)
+                // - Local dev (uses GOOGLE_APPLICATION_CREDENTIALS env variable pointing to JSON)
+                // - GCP VMs (uses metadata server)
+                GoogleCredentials credentials = GoogleCredentials.getApplicationDefault();
+
+                storage = StorageOptions.newBuilder()
+                    .setProjectId(projectId)
+                    .setCredentials(credentials)
+                    .build()
+                    .getService();
+
+                logger.info("✅ Google Cloud Storage initialized for project: {}", projectId);
+
+                // Ensure bucket exists
+                ensureBucketExists();
+
+                if (isConfigured) {
+                    logger.info("✅ GCS READY: All systems operational");
+                } else {
+                    logger.warn("⚠️ GCS DEGRADED: Bucket '{}' access failed. Check IAM permissions on service account.", bucketName);
+                }
+            } catch (IOException e) {
+                logger.error("❌ GCS AUTHENTICATION FAILED: {}", e.getMessage());
+                logger.warn("⚠️ Ensure one of the following:");
+                logger.warn("   1. Running in Cloud Run with attached service account");
+                logger.warn("   2. Running locally with GOOGLE_APPLICATION_CREDENTIALS env var set");
+                logger.warn("   3. Running in GCP with metadata server enabled");
+                isConfigured = false;
+                storage = null;
             }
         } catch (Exception e) {
-            logger.error("❌ GCS INITIALIZATION ERROR: Unexpected error during setup: {}", e.getMessage());
+            logger.error("❌ GCS INITIALIZATION ERROR: {}", e.getMessage());
             isConfigured = false;
             storage = null;
         }
