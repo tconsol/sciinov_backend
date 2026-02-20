@@ -1,6 +1,7 @@
 package com.sciinov.dbms.service;
 
 import com.google.auth.oauth2.GoogleCredentials;
+import com.google.auth.oauth2.ServiceAccountCredentials;
 import com.google.cloud.storage.*;
 import com.google.api.gax.paging.Page;
 import com.sciinov.dbms.entity.Conference;
@@ -15,6 +16,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
@@ -37,8 +39,35 @@ public class GoogleCloudStorageService {
     @Value("${gcs.bucket-name}")
     private String bucketName;
 
-    @Value("${gcs.credentials-path:}")
-    private String credentialsPath;
+    @Value("${gcs.type:}")
+    private String gcsType;
+
+    @Value("${gcs.private-key-id:}")
+    private String privateKeyId;
+
+    @Value("${gcs.private-key:}")
+    private String privateKey;
+
+    @Value("${gcs.client-email:}")
+    private String clientEmail;
+
+    @Value("${gcs.client-id:}")
+    private String clientId;
+
+    @Value("${gcs.auth-uri:}")
+    private String authUri;
+
+    @Value("${gcs.token-uri:}")
+    private String tokenUri;
+
+    @Value("${gcs.auth-provider-x509-cert-url:}")
+    private String authProviderX509CertUrl;
+
+    @Value("${gcs.client-x509-cert-url:}")
+    private String clientX509CertUrl;
+
+    @Value("${gcs.universe-domain:}")
+    private String universeDomain;
 
     @Autowired
     private ConferenceRepository conferenceRepository;
@@ -66,12 +95,8 @@ public class GoogleCloudStorageService {
             }
 
             try {
-                // Use Application Default Credentials (ADC)
-                // Works in:
-                // - Cloud Run (uses attached service account via metadata server)
-                // - Local dev (uses GOOGLE_APPLICATION_CREDENTIALS env variable pointing to JSON)
-                // - GCP VMs (uses metadata server)
-                GoogleCredentials credentials = GoogleCredentials.getApplicationDefault();
+                // Build credentials from .env variables
+                GoogleCredentials credentials = createCredentialsFromEnv();
 
                 storage = StorageOptions.newBuilder()
                     .setProjectId(projectId)
@@ -91,10 +116,7 @@ public class GoogleCloudStorageService {
                 }
             } catch (IOException e) {
                 logger.error("❌ GCS AUTHENTICATION FAILED: {}", e.getMessage());
-                logger.warn("⚠️ Ensure one of the following:");
-                logger.warn("   1. Running in Cloud Run with attached service account");
-                logger.warn("   2. Running locally with GOOGLE_APPLICATION_CREDENTIALS env var set");
-                logger.warn("   3. Running in GCP with metadata server enabled");
+                logger.warn("⚠️ Ensure all GCS_* environment variables are set in .env file");
                 isConfigured = false;
                 storage = null;
             }
@@ -103,6 +125,56 @@ public class GoogleCloudStorageService {
             isConfigured = false;
             storage = null;
         }
+    }
+
+    /**
+     * Create GoogleCredentials from environment variables
+     */
+    private GoogleCredentials createCredentialsFromEnv() throws IOException {
+        // Check if all required credentials are present in .env
+        if (privateKey == null || privateKey.isEmpty() ||
+            clientEmail == null || clientEmail.isEmpty() ||
+            projectId == null || projectId.isEmpty()) {
+
+            logger.error("❌ Missing required GCS credentials in .env file");
+            logger.error("Required: GCS_PRIVATE_KEY, GCS_CLIENT_EMAIL, GCS_PROJECT_ID");
+            throw new IOException("GCS credentials not configured in .env");
+        }
+
+        // Build JSON credentials string from environment variables
+        String credentialsJson = String.format(
+            "{" +
+            "\"type\":\"%s\"," +
+            "\"project_id\":\"%s\"," +
+            "\"private_key_id\":\"%s\"," +
+            "\"private_key\":\"%s\"," +
+            "\"client_email\":\"%s\"," +
+            "\"client_id\":\"%s\"," +
+            "\"auth_uri\":\"%s\"," +
+            "\"token_uri\":\"%s\"," +
+            "\"auth_provider_x509_cert_url\":\"%s\"," +
+            "\"client_x509_cert_url\":\"%s\"," +
+            "\"universe_domain\":\"%s\"" +
+            "}",
+            gcsType != null ? gcsType : "service_account",
+            projectId,
+            privateKeyId != null ? privateKeyId : "",
+            privateKey,  // Contains literal \n from .env
+            clientEmail,
+            clientId != null ? clientId : "",
+            authUri != null ? authUri : "https://accounts.google.com/o/oauth2/auth",
+            tokenUri != null ? tokenUri : "https://oauth2.googleapis.com/token",
+            authProviderX509CertUrl != null ? authProviderX509CertUrl : "https://www.googleapis.com/oauth2/v1/certs",
+            clientX509CertUrl != null ? clientX509CertUrl : "",
+            universeDomain != null ? universeDomain : "googleapis.com"
+        );
+
+        // Parse credentials from JSON string
+        InputStream credentialsStream = new ByteArrayInputStream(credentialsJson.getBytes());
+        GoogleCredentials credentials = ServiceAccountCredentials.fromStream(credentialsStream);
+
+        logger.info("✅ GCS credentials loaded from .env variables for: {}", clientEmail);
+        return credentials;
     }
 
     /**
