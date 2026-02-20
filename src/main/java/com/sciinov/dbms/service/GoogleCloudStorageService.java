@@ -25,6 +25,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -320,6 +321,40 @@ public class GoogleCloudStorageService {
         logger.info("File uploaded to GCS with lifetime signed URL: {}", signedUrl);
 
         return signedUrl;
+    }
+
+    /**
+     * Upload file to custom folder path (for conference documents)
+     * @param file File to upload
+     * @param customFolderPath Custom folder path (e.g., "conferences/tech-summit/2026/program/")
+     * @return Map with keys "blobName" (exact GCS blob path) and "signedUrl" (lifetime signed URL)
+     */
+    public Map<String, String> uploadFileAndGetBlobName(MultipartFile file, String customFolderPath) throws IOException {
+        if (!isConfigured) {
+            throw new IllegalStateException(
+                "Google Cloud Storage is not properly configured. " +
+                "Check logs and ensure service account has 'Storage Object Admin' role."
+            );
+        }
+
+        String originalFilename = file.getOriginalFilename() != null ? file.getOriginalFilename() : "file";
+        String fileName = sanitizeFileName(originalFilename);
+        String blobName = customFolderPath + fileName;
+
+        BlobId blobId = BlobId.of(bucketName, blobName);
+        BlobInfo blobInfo = BlobInfo.newBuilder(blobId)
+            .setContentType(file.getContentType())
+            .build();
+
+        storage.create(blobInfo, file.getBytes());
+
+        String signedUrl = generateSignedUrl(blobName);
+        logger.info("File uploaded to GCS - blobName: {}, signedUrl: {}", blobName, signedUrl);
+
+        Map<String, String> result = new java.util.HashMap<>();
+        result.put("blobName", blobName);
+        result.put("signedUrl", signedUrl);
+        return result;
     }
 
     /**

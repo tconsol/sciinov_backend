@@ -8,6 +8,11 @@ import java.util.List;
 
 @Repository
 public interface AdminActivityLogRepository extends MongoRepository<AdminActivityLog, String> {
+    List<AdminActivityLog> findByAdminIdOrderByCreatedAtDesc(String adminId);
     List<AdminActivityLog> findByAdminId(String adminId);
+    List<AdminActivityLog> findByConferenceIdOrderByCreatedAtDesc(String conferenceId);
     List<AdminActivityLog> findByConferenceId(String conferenceId);
+    List<AdminActivityLog> findByActionType(AdminActivityLog.ActionType actionType);
+    List<AdminActivityLog> findByAdminIdAndConferenceId(String adminId, String conferenceId);
+    List<AdminActivityLog> findAllByOrderByCreatedAtDesc();
 }

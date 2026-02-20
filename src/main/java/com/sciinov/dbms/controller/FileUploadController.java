@@ -5,6 +5,9 @@ import com.sciinov.dbms.entity.User;
 import com.sciinov.dbms.security.UserDetailsImpl;
 import com.sciinov.dbms.service.GoogleCloudStorageService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.InputStreamResource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -12,6 +15,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
@@ -163,7 +167,7 @@ public class FileUploadController {
      * Delete a file from GCS
      */
     @DeleteMapping("/delete")
-    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
     public ResponseEntity<?> deleteFile(@RequestParam("blobName") String blobName) {
         if (!gcsService.isConfigured()) {
             return ResponseEntity.badRequest()
@@ -212,6 +216,47 @@ public class FileUploadController {
     }
 
     /**
+     * Download a file from GCS by blob name
+     * This endpoint streams the file directly with proper headers for browser download
+     * GET /api/files/download?blobName={blobName}
+     */
+    @GetMapping("/download")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN') or isAuthenticated()")
+    public ResponseEntity<?> downloadFile(@RequestParam("blobName") String blobName) {
+        if (!gcsService.isConfigured()) {
+            return ResponseEntity.badRequest()
+                .body(new MessageResponse("Google Cloud Storage is not configured", false));
+        }
+
+        try {
+            // Download file content from GCS
+            byte[] fileContent = gcsService.downloadFile(blobName);
+
+            if (fileContent == null || fileContent.length == 0) {
+                return ResponseEntity.badRequest()
+                    .body(new MessageResponse("File is empty or not found", false));
+            }
+
+            // Extract filename from blob path
+            String fileName = extractFileName(blobName);
+            String contentType = getContentTypeFromExtension(fileName);
+
+            return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + sanitizeFileName(fileName) + "\"")
+                .header(HttpHeaders.CONTENT_TYPE, contentType)
+                .header(HttpHeaders.CONTENT_LENGTH, String.valueOf(fileContent.length))
+                .header("Cache-Control", "no-cache, no-store, must-revalidate")
+                .header("Pragma", "no-cache")
+                .header("Expires", "0")
+                .body(new InputStreamResource(new ByteArrayInputStream(fileContent)));
+
+        } catch (Exception e) {
+            return ResponseEntity.badRequest()
+                .body(new MessageResponse("Failed to download file: " + e.getMessage(), false));
+        }
+    }
+
+    /**
      * Check GCS configuration status
      */
     @GetMapping("/status")
@@ -232,6 +277,51 @@ public class FileUploadController {
                 throw new AccessDeniedException("Access Denied: You are not assigned to this conference.");
             }
         }
+    }
+
+    /**
+     * Extract filename from full blob path
+     * Example: conferences/tech-summit/dashboard1/20240101-12345.pdf -> 20240101-12345.pdf
+     */
+    private String extractFileName(String blobPath) {
+        if (blobPath == null || blobPath.isEmpty()) {
+            return "download";
+        }
+        return blobPath.substring(blobPath.lastIndexOf('/') + 1);
+    }
+
+    /**
+     * Get content type based on file extension
+     */
+    private String getContentTypeFromExtension(String fileName) {
+        if (fileName == null) return "application/octet-stream";
+
+        String lowerName = fileName.toLowerCase();
+        if (lowerName.endsWith(".pdf")) return "application/pdf";
+        if (lowerName.endsWith(".xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        if (lowerName.endsWith(".xls")) return "application/vnd.ms-excel";
+        if (lowerName.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        if (lowerName.endsWith(".doc")) return "application/msword";
+        if (lowerName.endsWith(".ppt")) return "application/vnd.ms-powerpoint";
+        if (lowerName.endsWith(".pptx")) return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+        if (lowerName.endsWith(".zip")) return "application/zip";
+        if (lowerName.endsWith(".txt")) return "text/plain";
+        if (lowerName.endsWith(".csv")) return "text/csv";
+        if (lowerName.endsWith(".jpg") || lowerName.endsWith(".jpeg")) return "image/jpeg";
+        if (lowerName.endsWith(".png")) return "image/png";
+        if (lowerName.endsWith(".gif")) return "image/gif";
+        if (lowerName.endsWith(".mp4")) return "video/mp4";
+
+        return "application/octet-stream";
+    }
+
+    /**
+     * Sanitize filename for Content-Disposition header
+     * Removes special characters that may break file download
+     */
+    private String sanitizeFileName(String fileName) {
+        if (fileName == null) return "download";
+        return fileName.replaceAll("[\"\\\\/:*?<>|]", "_");
     }
 }
 

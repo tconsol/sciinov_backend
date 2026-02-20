@@ -28,6 +28,8 @@ public class ConferenceDocument {
 
     private String fileName;
 
+    private String blobName; // GCS blob name (exact path used in bucket, needed for download/delete)
+
     private String filePath; // GCS path: conferences/{conference}/{year}/{documentType}/{fileName}
 
     private String publicUrl; // GCS public URL
@@ -115,6 +117,14 @@ public class ConferenceDocument {
 
     public void setFileName(String fileName) {
         this.fileName = fileName;
+    }
+
+    public String getBlobName() {
+        return blobName;
+    }
+
+    public void setBlobName(String blobName) {
+        this.blobName = blobName;
     }
 
     public String getFilePath() {

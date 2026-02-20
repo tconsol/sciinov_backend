@@ -22,7 +22,8 @@ public class AdminActivityLog {
     private LocalDateTime createdAt;
 
     public enum ActionType {
-        CREATE, UPDATE, DELETE, VIEW, DOWNLOAD_EXCEL, DOWNLOAD_PDF, UPLOAD_EXCEL
+        CREATE, UPDATE, DELETE, VIEW, DOWNLOAD_EXCEL, DOWNLOAD_PDF, UPLOAD_EXCEL,
+        UPLOAD_FILE, DOWNLOAD_FILE, DELETE_FILE
     }
 
     // Getters and Setters

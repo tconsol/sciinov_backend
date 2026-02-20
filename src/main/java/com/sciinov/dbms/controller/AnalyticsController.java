@@ -7,11 +7,13 @@ import com.sciinov.dbms.service.AnalyticsService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @CrossOrigin(origins = "*", maxAge = 3600)
 @RestController
@@ -22,61 +24,119 @@ public class AnalyticsController {
     @Autowired
     private AnalyticsService analyticsService;
 
+    private UserDetailsImpl getCurrentUser() {
+        return (UserDetailsImpl) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+    }
+
+    // ── ADMIN: own upload stats ───────────────────────────────────────
+
+    /** GET /api/analytics/upload-stats/me
+     *  Admin sees only their own upload history (all conferences) */
     @GetMapping("/upload-stats/me")
-    @PreAuthorize("hasRole('ADMIN')")
-    public List<DashboardUploadStats> getMyAdminUploadStats() {
-        UserDetailsImpl userDetails = (UserDetailsImpl) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        String adminId = userDetails.getId();
-        logger.info("GET /api/analytics/upload-stats/me - Retrieving upload stats for admin {}", adminId);
+    @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
+    public ResponseEntity<?> getMyUploadStats() {
+        String adminId = getCurrentUser().getId();
+        logger.info("GET /api/analytics/upload-stats/me - admin {}", adminId);
         List<DashboardUploadStats> stats = analyticsService.getUploadStatsByAdmin(adminId);
-        logger.info("GET /api/analytics/upload-stats/me - Retrieved {} upload stats for admin {}", stats.size(), adminId);
-        return stats;
+        return ResponseEntity.ok(Map.of("success", true, "count", stats.size(), "data", stats));
     }
 
+    /** GET /api/analytics/upload-stats/me/conference/{conferenceId}
+     *  Admin sees their own upload history scoped to one conference */
+    @GetMapping("/upload-stats/me/conference/{conferenceId}")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
+    public ResponseEntity<?> getMyUploadStatsByConference(@PathVariable String conferenceId) {
+        String adminId = getCurrentUser().getId();
+        logger.info("GET upload-stats/me/conference/{} - admin {}", conferenceId, adminId);
+        List<DashboardUploadStats> stats = analyticsService.getUploadStatsByAdminAndConference(adminId, conferenceId);
+        return ResponseEntity.ok(Map.of("success", true, "conferenceId", conferenceId, "count", stats.size(), "data", stats));
+    }
+
+    // ── ADMIN: own activity logs ──────────────────────────────────────
+
+    /** GET /api/analytics/logs/me
+     *  Admin sees only their own activity logs */
     @GetMapping("/logs/me")
-    @PreAuthorize("hasRole('ADMIN')")
-    public List<AdminActivityLog> getMyAdminLogs() {
-        UserDetailsImpl userDetails = (UserDetailsImpl) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        String adminId = userDetails.getId();
-        logger.info("GET /api/analytics/logs/me - Retrieving activity logs for admin {}", adminId);
+    @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
+    public ResponseEntity<?> getMyLogs() {
+        String adminId = getCurrentUser().getId();
+        logger.info("GET /api/analytics/logs/me - admin {}", adminId);
         List<AdminActivityLog> logs = analyticsService.getActivityLogsByAdmin(adminId);
-        logger.info("GET /api/analytics/logs/me - Retrieved {} activity logs for admin {}", logs.size(), adminId);
-        return logs;
+        return ResponseEntity.ok(Map.of("success", true, "count", logs.size(), "data", logs));
     }
 
+    /** GET /api/analytics/logs/me/conference/{conferenceId}
+     *  Admin sees their own logs for a specific conference */
+    @GetMapping("/logs/me/conference/{conferenceId}")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
+    public ResponseEntity<?> getMyLogsByConference(@PathVariable String conferenceId) {
+        String adminId = getCurrentUser().getId();
+        logger.info("GET logs/me/conference/{} - admin {}", conferenceId, adminId);
+        List<AdminActivityLog> logs = analyticsService.getActivityLogsByAdminAndConference(adminId, conferenceId);
+        return ResponseEntity.ok(Map.of("success", true, "conferenceId", conferenceId, "count", logs.size(), "data", logs));
+    }
+
+    // ── SUPER ADMIN: all upload stats ─────────────────────────────────
+
+    /** GET /api/analytics/upload-stats
+     *  Super Admin sees all upload stats across all admins */
+    @GetMapping("/upload-stats")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public ResponseEntity<?> getAllUploadStats() {
+        logger.info("GET /api/analytics/upload-stats - SUPER_ADMIN");
+        List<DashboardUploadStats> stats = analyticsService.getAllUploadStats();
+        return ResponseEntity.ok(Map.of("success", true, "count", stats.size(), "data", stats));
+    }
+
+    /** GET /api/analytics/upload-stats/admin/{adminId}
+     *  Super Admin views a specific admin's upload stats */
     @GetMapping("/upload-stats/admin/{adminId}")
     @PreAuthorize("hasRole('SUPER_ADMIN')")
-    public List<DashboardUploadStats> getUploadStatsByAdmin(@PathVariable String adminId) {
-        logger.info("GET /api/analytics/upload-stats/admin/{} - Retrieving upload stats", adminId);
+    public ResponseEntity<?> getUploadStatsByAdmin(@PathVariable String adminId) {
+        logger.info("GET upload-stats/admin/{}", adminId);
         List<DashboardUploadStats> stats = analyticsService.getUploadStatsByAdmin(adminId);
-        logger.info("GET /api/analytics/upload-stats/admin/{} - Retrieved {} upload stats", adminId, stats.size());
-        return stats;
+        return ResponseEntity.ok(Map.of("success", true, "adminId", adminId, "count", stats.size(), "data", stats));
     }
-    
+
+    /** GET /api/analytics/upload-stats/conference/{conferenceId}
+     *  Super Admin views upload stats for a specific conference */
     @GetMapping("/upload-stats/conference/{conferenceId}")
     @PreAuthorize("hasRole('SUPER_ADMIN')")
-    public List<DashboardUploadStats> getUploadStatsByConference(@PathVariable String conferenceId) {
-        logger.info("GET /api/analytics/upload-stats/conference/{} - Retrieving upload stats", conferenceId);
+    public ResponseEntity<?> getUploadStatsByConference(@PathVariable String conferenceId) {
+        logger.info("GET upload-stats/conference/{}", conferenceId);
         List<DashboardUploadStats> stats = analyticsService.getUploadStatsByConference(conferenceId);
-        logger.info("GET /api/analytics/upload-stats/conference/{} - Retrieved {} upload stats", conferenceId, stats.size());
-        return stats;
+        return ResponseEntity.ok(Map.of("success", true, "conferenceId", conferenceId, "count", stats.size(), "data", stats));
     }
-    
+
+    // ── SUPER ADMIN: all activity logs ────────────────────────────────
+
+    /** GET /api/analytics/logs
+     *  Super Admin sees all activity logs across all admins */
     @GetMapping("/logs")
     @PreAuthorize("hasRole('SUPER_ADMIN')")
-    public List<AdminActivityLog> getAllLogs() {
-        logger.info("GET /api/analytics/logs - Retrieving all activity logs");
+    public ResponseEntity<?> getAllLogs() {
+        logger.info("GET /api/analytics/logs - SUPER_ADMIN");
         List<AdminActivityLog> logs = analyticsService.getAllActivityLogs();
-        logger.info("GET /api/analytics/logs - Retrieved {} activity logs", logs.size());
-        return logs;
+        return ResponseEntity.ok(Map.of("success", true, "count", logs.size(), "data", logs));
     }
-    
+
+    /** GET /api/analytics/logs/admin/{adminId}
+     *  Super Admin views a specific admin's activity logs */
     @GetMapping("/logs/admin/{adminId}")
     @PreAuthorize("hasRole('SUPER_ADMIN')")
-    public List<AdminActivityLog> getLogsByAdmin(@PathVariable String adminId) {
-        logger.info("GET /api/analytics/logs/admin/{} - Retrieving activity logs", adminId);
+    public ResponseEntity<?> getLogsByAdmin(@PathVariable String adminId) {
+        logger.info("GET logs/admin/{}", adminId);
         List<AdminActivityLog> logs = analyticsService.getActivityLogsByAdmin(adminId);
-        logger.info("GET /api/analytics/logs/admin/{} - Retrieved {} activity logs", adminId, logs.size());
-        return logs;
+        return ResponseEntity.ok(Map.of("success", true, "adminId", adminId, "count", logs.size(), "data", logs));
+    }
+
+    /** GET /api/analytics/logs/conference/{conferenceId}
+     *  Super Admin views all logs for a specific conference */
+    @GetMapping("/logs/conference/{conferenceId}")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public ResponseEntity<?> getLogsByConference(@PathVariable String conferenceId) {
+        logger.info("GET logs/conference/{}", conferenceId);
+        List<AdminActivityLog> logs = analyticsService.getActivityLogsByConference(conferenceId);
+        return ResponseEntity.ok(Map.of("success", true, "conferenceId", conferenceId, "count", logs.size(), "data", logs));
     }
 }

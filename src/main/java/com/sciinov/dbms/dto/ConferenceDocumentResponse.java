@@ -14,6 +14,7 @@ public class ConferenceDocumentResponse {
     private String documentType;
     private String documentTypeDisplayName;
     private String fileName;
+    private String blobName;   // GCS blob name (exact path in bucket)
     private String filePath;
     private String publicUrl;
     private Long fileSize;
@@ -32,6 +33,7 @@ public class ConferenceDocumentResponse {
         this.documentType = doc.getDocumentType().name();
         this.documentTypeDisplayName = doc.getDocumentType().getDisplayName();
         this.fileName = doc.getFileName();
+        this.blobName = doc.getBlobName();
         this.filePath = doc.getFilePath();
         this.publicUrl = doc.getPublicUrl();
         this.fileSize = doc.getFileSize();
@@ -97,6 +99,14 @@ public class ConferenceDocumentResponse {
 
     public void setFileName(String fileName) {
         this.fileName = fileName;
+    }
+
+    public String getBlobName() {
+        return blobName;
+    }
+
+    public void setBlobName(String blobName) {
+        this.blobName = blobName;
     }
 
     public String getFilePath() {

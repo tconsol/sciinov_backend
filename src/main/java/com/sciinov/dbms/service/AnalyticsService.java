@@ -14,32 +14,57 @@ import java.util.Optional;
 
 @Service
 public class AnalyticsService {
+
     @Autowired
     private DashboardUploadStatsRepository dashboardUploadStatsRepository;
-    
+
     @Autowired
     private AdminActivityLogRepository adminActivityLogRepository;
 
     @Autowired
-    private UserRepository userRepository; // Autowire UserRepository
-    
+    private UserRepository userRepository;
+
+    // ── Upload Stats ──────────────────────────────────────────────────
+
     public List<DashboardUploadStats> getUploadStatsByAdmin(String adminId) {
-        return dashboardUploadStatsRepository.findByAdminId(adminId);
+        return dashboardUploadStatsRepository.findByAdminIdOrderByUploadedAtDesc(adminId);
     }
-    
+
     public List<DashboardUploadStats> getUploadStatsByConference(String conferenceId) {
-        return dashboardUploadStatsRepository.findByConferenceId(conferenceId);
+        return dashboardUploadStatsRepository.findByConferenceIdOrderByUploadedAtDesc(conferenceId);
     }
-    
+
+    public List<DashboardUploadStats> getUploadStatsByAdminAndConference(String adminId, String conferenceId) {
+        return dashboardUploadStatsRepository.findByAdminIdAndConferenceId(adminId, conferenceId);
+    }
+
+    public List<DashboardUploadStats> getAllUploadStats() {
+        return dashboardUploadStatsRepository.findAllByOrderByUploadedAtDesc();
+    }
+
+    // ── Activity Logs ─────────────────────────────────────────────────
+
     public List<AdminActivityLog> getActivityLogsByAdmin(String adminId) {
-        List<AdminActivityLog> logs = adminActivityLogRepository.findByAdminId(adminId);
+        List<AdminActivityLog> logs = adminActivityLogRepository.findByAdminIdOrderByCreatedAtDesc(adminId);
         return populateAdminNames(logs);
     }
-    
+
     public List<AdminActivityLog> getAllActivityLogs() {
-        List<AdminActivityLog> logs = adminActivityLogRepository.findAll();
+        List<AdminActivityLog> logs = adminActivityLogRepository.findAllByOrderByCreatedAtDesc();
         return populateAdminNames(logs);
     }
+
+    public List<AdminActivityLog> getActivityLogsByConference(String conferenceId) {
+        List<AdminActivityLog> logs = adminActivityLogRepository.findByConferenceIdOrderByCreatedAtDesc(conferenceId);
+        return populateAdminNames(logs);
+    }
+
+    public List<AdminActivityLog> getActivityLogsByAdminAndConference(String adminId, String conferenceId) {
+        List<AdminActivityLog> logs = adminActivityLogRepository.findByAdminIdAndConferenceId(adminId, conferenceId);
+        return populateAdminNames(logs);
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────
 
     private List<AdminActivityLog> populateAdminNames(List<AdminActivityLog> logs) {
         for (AdminActivityLog log : logs) {

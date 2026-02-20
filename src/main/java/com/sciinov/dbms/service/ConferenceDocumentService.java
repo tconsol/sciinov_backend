@@ -69,25 +69,30 @@ public class ConferenceDocumentService {
             conferenceDocumentRepository.findByConferenceIdAndYearAndDocumentTypeAndDeletedFalse(
                 conferenceId, year, documentType);
 
-        // If exists, delete old file from GCS
+        // If exists, delete old file from GCS and hard-delete from DB
         if (existingDoc.isPresent()) {
             ConferenceDocument oldDoc = existingDoc.get();
             try {
-                if (oldDoc.getFilePath() != null) {
-                    gcsService.deleteFile(oldDoc.getFilePath());
-                    logger.info("Deleted old file from GCS: {}", oldDoc.getFilePath());
+                // Use blobName first; fall back to filePath for legacy records
+                String oldGcsKey = (oldDoc.getBlobName() != null && !oldDoc.getBlobName().isEmpty())
+                        ? oldDoc.getBlobName() : oldDoc.getFilePath();
+                if (oldGcsKey != null && !oldGcsKey.isEmpty()) {
+                    gcsService.deleteFile(oldGcsKey);
+                    logger.info("Deleted old file from GCS: {}", oldGcsKey);
                 }
             } catch (Exception e) {
                 logger.warn("Failed to delete old file from GCS: {}", e.getMessage());
             }
-            // Delete from database
-            oldDoc.setDeleted(true);
-            conferenceDocumentRepository.save(oldDoc);
+            // Hard-delete old record from database
+            conferenceDocumentRepository.deleteById(oldDoc.getId());
+            logger.info("Hard-deleted old document from database - ID: {}", oldDoc.getId());
         }
 
-        // Upload new file to GCS
+        // Upload new file to GCS - get back the actual blobName and signed URL
         String folderPath = generateFolderPath(conference.getTitle(), year, documentType);
-        String gcsPath = gcsService.uploadFile(file, folderPath);
+        Map<String, String> uploadResult = gcsService.uploadFileAndGetBlobName(file, folderPath);
+        String blobName = uploadResult.get("blobName");
+        String signedUrl = uploadResult.get("signedUrl");
 
         // Create new document entry
         ConferenceDocument newDoc = new ConferenceDocument();
@@ -96,8 +101,9 @@ public class ConferenceDocumentService {
         newDoc.setYear(year);
         newDoc.setDocumentType(documentType);
         newDoc.setFileName(file.getOriginalFilename());
-        newDoc.setFilePath(folderPath + getFileName(file.getOriginalFilename()));
-        newDoc.setPublicUrl(gcsPath);
+        newDoc.setBlobName(blobName);           // Store actual GCS blob name for download/delete
+        newDoc.setFilePath(blobName);           // Keep filePath in sync with blobName
+        newDoc.setPublicUrl(signedUrl);
         newDoc.setFileSize(file.getSize());
         newDoc.setContentType(file.getContentType());
         newDoc.setUploadedByUserId(userId);
@@ -111,8 +117,8 @@ public class ConferenceDocumentService {
 
         // Log activity
         logActivity(userId, userName, conferenceId, null,
-            AdminActivityLog.ActionType.UPLOAD_EXCEL,
-            "Uploaded " + documentType.getDisplayName() + " document for year " + year,
+            AdminActivityLog.ActionType.UPLOAD_FILE,
+            "Uploaded " + documentType.getDisplayName() + " document '" + file.getOriginalFilename() + "' for year " + year,
             ipAddress);
 
         // Record upload stats
@@ -232,13 +238,32 @@ public class ConferenceDocumentService {
         }
 
         ConferenceDocument doc = docOpt.get();
-        byte[] fileContent = gcsService.downloadFile(doc.getFilePath());
-        logger.info("Downloaded document - ID: {}, Name: {}", documentId, doc.getFileName());
+        // Use blobName first; fall back to filePath for legacy records
+        String gcsKey = (doc.getBlobName() != null && !doc.getBlobName().isEmpty())
+                ? doc.getBlobName() : doc.getFilePath();
+        if (gcsKey == null || gcsKey.isEmpty()) {
+            throw new RuntimeException("Document has no valid GCS path stored: " + documentId);
+        }
+        byte[] fileContent = gcsService.downloadFile(gcsKey);
+        logger.info("Downloaded document - ID: {}, Name: {}, GCS key: {}", documentId, doc.getFileName(), gcsKey);
         return fileContent;
     }
 
     /**
-     * Delete document
+     * Download document file and log the activity
+     */
+    public byte[] downloadDocument(String documentId, String userId, String userName, String ipAddress) throws IOException {
+        byte[] content = downloadDocument(documentId);
+        Optional<ConferenceDocument> docOpt = getDocumentById(documentId);
+        docOpt.ifPresent(doc -> logActivity(userId, userName, doc.getConferenceId(), null,
+            AdminActivityLog.ActionType.DOWNLOAD_FILE,
+            "Downloaded " + doc.getDocumentType().getDisplayName() + " document '" + doc.getFileName() + "' for year " + doc.getYear(),
+            ipAddress));
+        return content;
+    }
+
+    /**
+     * Delete document - removes from GCS bucket and hard-deletes from database
      */
     public void deleteDocument(String documentId) {
         Optional<ConferenceDocument> docOpt = conferenceDocumentRepository.findById(documentId);
@@ -248,18 +273,40 @@ public class ConferenceDocumentService {
 
         ConferenceDocument doc = docOpt.get();
 
-        // Delete from GCS
-        try {
-            gcsService.deleteFile(doc.getFilePath());
-            logger.info("Deleted file from GCS: {}", doc.getFilePath());
-        } catch (Exception e) {
-            logger.warn("Failed to delete file from GCS: {}", e.getMessage());
+        // Delete from GCS bucket using blobName (fall back to filePath for legacy records)
+        String gcsKey = (doc.getBlobName() != null && !doc.getBlobName().isEmpty())
+                ? doc.getBlobName() : doc.getFilePath();
+        if (gcsKey != null && !gcsKey.isEmpty()) {
+            try {
+                gcsService.deleteFile(gcsKey);
+                logger.info("Deleted file from GCS bucket - blobName: {}", gcsKey);
+            } catch (Exception e) {
+                logger.warn("Failed to delete file from GCS (may already be gone): {}", e.getMessage());
+            }
+        } else {
+            logger.warn("No GCS key found for document ID: {}, skipping GCS deletion", documentId);
         }
 
-        // Mark as deleted in database
-        doc.setDeleted(true);
-        conferenceDocumentRepository.save(doc);
-        logger.info("Marked document as deleted - ID: {}", documentId);
+        // Hard-delete from database
+        conferenceDocumentRepository.deleteById(documentId);
+        logger.info("Hard-deleted document from database - ID: {}, File: {}", documentId, doc.getFileName());
+    }
+
+    /**
+     * Delete document and log the activity
+     */
+    public void deleteDocument(String documentId, String userId, String userName, String ipAddress) {
+        // Fetch doc info before deletion for logging
+        Optional<ConferenceDocument> docOpt = conferenceDocumentRepository.findById(documentId);
+        if (docOpt.isEmpty()) {
+            throw new RuntimeException("Document not found: " + documentId);
+        }
+        ConferenceDocument doc = docOpt.get();
+        deleteDocument(documentId);
+        logActivity(userId, userName, doc.getConferenceId(), null,
+            AdminActivityLog.ActionType.DELETE_FILE,
+            "Deleted " + doc.getDocumentType().getDisplayName() + " document '" + doc.getFileName() + "' for year " + doc.getYear(),
+            ipAddress);
     }
 
     /**
@@ -277,7 +324,7 @@ public class ConferenceDocumentService {
     }
 
     /**
-     * Get document statistics
+     * Get document statistics for a single conference
      */
     public Map<String, Object> getDocumentStatistics(String conferenceId) {
         Map<String, Object> stats = new HashMap<>();
@@ -305,6 +352,84 @@ public class ConferenceDocumentService {
                 Collectors.counting()
             ));
         stats.put("documentsByType", docsByType);
+
+        // Total file size in bytes
+        long totalSize = docs.stream()
+            .mapToLong(d -> d.getFileSize() != null ? d.getFileSize() : 0L)
+            .sum();
+        stats.put("totalFileSizeBytes", totalSize);
+
+        // Latest upload timestamp
+        docs.stream()
+            .map(ConferenceDocument::getUploadedAt)
+            .filter(Objects::nonNull)
+            .max(Comparator.naturalOrder())
+            .ifPresent(t -> stats.put("lastUploadedAt", t));
+
+        return stats;
+    }
+
+    /**
+     * Get global document statistics across ALL conferences (SUPER_ADMIN use)
+     */
+    public Map<String, Object> getGlobalDocumentStatistics() {
+        Map<String, Object> stats = new HashMap<>();
+
+        List<ConferenceDocument> all = conferenceDocumentRepository.findAll()
+            .stream()
+            .filter(d -> !d.isDeleted())
+            .collect(Collectors.toList());
+
+        stats.put("totalDocuments", all.size());
+
+        // Unique conferences that have documents
+        long totalConferences = all.stream()
+            .map(ConferenceDocument::getConferenceId)
+            .distinct()
+            .count();
+        stats.put("totalConferences", totalConferences);
+
+        // Unique years across all conferences
+        List<Integer> years = all.stream()
+            .map(ConferenceDocument::getYear)
+            .distinct()
+            .sorted(Collections.reverseOrder())
+            .collect(Collectors.toList());
+        stats.put("years", years);
+
+        // Total file size
+        long totalSize = all.stream()
+            .mapToLong(d -> d.getFileSize() != null ? d.getFileSize() : 0L)
+            .sum();
+        stats.put("totalFileSizeBytes", totalSize);
+
+        // Documents grouped by conference name
+        Map<String, Long> byConference = all.stream()
+            .collect(Collectors.groupingBy(
+                d -> d.getConferenceName() != null ? d.getConferenceName() : d.getConferenceId(),
+                Collectors.counting()
+            ));
+        stats.put("documentsByConference", byConference);
+
+        // Documents grouped by year
+        Map<Integer, Long> byYear = all.stream()
+            .collect(Collectors.groupingBy(ConferenceDocument::getYear, Collectors.counting()));
+        stats.put("documentsByYear", byYear);
+
+        // Documents grouped by type
+        Map<String, Long> byType = all.stream()
+            .collect(Collectors.groupingBy(
+                d -> d.getDocumentType().getDisplayName(),
+                Collectors.counting()
+            ));
+        stats.put("documentsByType", byType);
+
+        // Latest upload timestamp
+        all.stream()
+            .map(ConferenceDocument::getUploadedAt)
+            .filter(Objects::nonNull)
+            .max(Comparator.naturalOrder())
+            .ifPresent(t -> stats.put("lastUploadedAt", t));
 
         return stats;
     }
@@ -387,5 +512,148 @@ public class ConferenceDocumentService {
             logger.error("Failed to record upload stats: {}", e.getMessage());
         }
     }
-}
 
+    /**
+     * Get all document data for an admin (scoped to their assigned conferences)
+     * Returns: documents grouped by conference, stats per conference, and total stats
+     */
+    public Map<String, Object> getAdminConferenceDocumentsData(List<String> conferenceIds) {
+        Map<String, Object> result = new HashMap<>();
+
+        if (conferenceIds == null || conferenceIds.isEmpty()) {
+            result.put("totalConferences", 0);
+            result.put("totalDocuments", 0);
+            result.put("conferencesData", new ArrayList<>());
+            return result;
+        }
+
+        // Get all documents for all admin's conferences
+        List<ConferenceDocument> allDocs = new ArrayList<>();
+        for (String confId : conferenceIds) {
+            List<ConferenceDocument> docs = conferenceDocumentRepository
+                .findByConferenceIdAndDeletedFalseOrderByYearDescUpdatedAtDesc(confId);
+            allDocs.addAll(docs);
+        }
+
+        // Build per-conference data
+        List<Map<String, Object>> conferencesData = new ArrayList<>();
+        for (String confId : conferenceIds) {
+            List<ConferenceDocument> docs = allDocs.stream()
+                .filter(d -> confId.equals(d.getConferenceId()))
+                .collect(Collectors.toList());
+
+            if (docs.isEmpty()) {
+                continue; // Skip conferences with no documents
+            }
+
+            Map<String, Object> confData = new HashMap<>();
+
+            // Conference info
+            Optional<Conference> conf = conferenceRepository.findByIdAndDeletedFalse(confId);
+            conf.ifPresent(c -> {
+                confData.put("conferenceId", c.getId());
+                confData.put("conferenceName", c.getTitle());
+                confData.put("conferenceStatus", c.getStatus());
+            });
+
+            // Documents count
+            confData.put("totalDocuments", docs.size());
+
+            // Documents grouped by year
+            Map<Integer, Long> byYear = docs.stream()
+                .collect(Collectors.groupingBy(ConferenceDocument::getYear, Collectors.counting()));
+            confData.put("documentsByYear", byYear);
+
+            // Documents grouped by type
+            Map<String, Long> byType = docs.stream()
+                .collect(Collectors.groupingBy(
+                    d -> d.getDocumentType().getDisplayName(),
+                    Collectors.counting()
+                ));
+            confData.put("documentsByType", byType);
+
+            // File size stats
+            long totalSize = docs.stream()
+                .mapToLong(d -> d.getFileSize() != null ? d.getFileSize() : 0L)
+                .sum();
+            confData.put("totalFileSizeBytes", totalSize);
+
+            // Recent uploads (last 5)
+            List<Map<String, Object>> recentUploads = docs.stream()
+                .sorted((d1, d2) -> {
+                    LocalDateTime t1 = d1.getUploadedAt() != null ? d1.getUploadedAt() : LocalDateTime.MIN;
+                    LocalDateTime t2 = d2.getUploadedAt() != null ? d2.getUploadedAt() : LocalDateTime.MIN;
+                    return t2.compareTo(t1);
+                })
+                .limit(5)
+                .map(d -> {
+                    Map<String, Object> entry = new HashMap<>();
+                    entry.put("id", d.getId());
+                    entry.put("fileName", d.getFileName());
+                    entry.put("documentType", d.getDocumentType().getDisplayName());
+                    entry.put("year", d.getYear());
+                    entry.put("fileSize", d.getFileSize() != null ? d.getFileSize() : 0L);
+                    entry.put("uploadedAt", d.getUploadedAt()); // HashMap allows null values, unlike Map.of()
+                    return entry;
+                })
+                .collect(Collectors.toList());
+            confData.put("recentUploads", recentUploads);
+
+            // Available years
+            List<Integer> years = docs.stream()
+                .map(ConferenceDocument::getYear)
+                .distinct()
+                .sorted(Collections.reverseOrder())
+                .collect(Collectors.toList());
+            confData.put("availableYears", years);
+
+            conferencesData.add(confData);
+        }
+
+        // Global stats across all admin's conferences
+        Map<String, Object> globalStats = new HashMap<>();
+        globalStats.put("totalConferences", conferencesData.size());
+        globalStats.put("totalDocuments", allDocs.size());
+
+        // Total file size
+        long totalSize = allDocs.stream()
+            .mapToLong(d -> d.getFileSize() != null ? d.getFileSize() : 0L)
+            .sum();
+        globalStats.put("totalFileSizeBytes", totalSize);
+
+        // All years across all conferences
+        List<Integer> allYears = allDocs.stream()
+            .map(ConferenceDocument::getYear)
+            .distinct()
+            .sorted(Collections.reverseOrder())
+            .collect(Collectors.toList());
+        globalStats.put("years", allYears);
+
+        // Docs by type across all conferences
+        Map<String, Object> typeStats = allDocs.stream()
+            .collect(Collectors.groupingBy(
+                d -> d.getDocumentType().getDisplayName(),
+                Collectors.counting()
+            )).entrySet().stream()
+            .collect(Collectors.toMap(
+                Map.Entry::getKey,
+                e -> (Object) e.getValue()
+            ));
+        globalStats.put("documentsByType", typeStats);
+
+        // Latest upload
+        Optional<LocalDateTime> lastUpload = allDocs.stream()
+            .map(ConferenceDocument::getUploadedAt)
+            .filter(Objects::nonNull)
+            .max(LocalDateTime::compareTo);
+        lastUpload.ifPresent(t -> globalStats.put("lastUploadedAt", t));
+
+        result.put("globalStats", globalStats);
+        result.put("conferencesData", conferencesData);
+
+        logger.info("Retrieved admin document data - Admin conferences: {}, Total docs: {}",
+            conferencesData.size(), allDocs.size());
+
+        return result;
+    }
+}

@@ -9,5 +9,9 @@ import java.util.List;
 @Repository
 public interface DashboardUploadStatsRepository extends MongoRepository<DashboardUploadStats, String> {
     List<DashboardUploadStats> findByAdminId(String adminId);
+    List<DashboardUploadStats> findByAdminIdOrderByUploadedAtDesc(String adminId);
     List<DashboardUploadStats> findByConferenceId(String conferenceId);
+    List<DashboardUploadStats> findByConferenceIdOrderByUploadedAtDesc(String conferenceId);
+    List<DashboardUploadStats> findByAdminIdAndConferenceId(String adminId, String conferenceId);
+    List<DashboardUploadStats> findAllByOrderByUploadedAtDesc();
 }
