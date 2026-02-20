@@ -34,7 +34,7 @@ public class WebSecurityConfig {
     @Autowired
     private AuthEntryPointJwt unauthorizedHandler;
 
-    @Value("${app.cors.allowed-origins:http://localhost:3000,http://localhost:5173}")
+commit    @Value("${app.cors.allowed-origins:https://sciinovdbms.com,http://localhost:3000,http://localhost:5173}")
     private String allowedOrigins;
 
     @Bean
@@ -69,6 +69,8 @@ public class WebSecurityConfig {
                 .exceptionHandling(exception -> exception.authenticationEntryPoint(unauthorizedHandler))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        // Permit all OPTIONS preflight requests (required for CORS)
+                        .requestMatchers(org.springframework.http.HttpMethod.OPTIONS, "/**").permitAll()
                         // Public endpoints
                         .requestMatchers("/api/auth/signin").permitAll()
                         .requestMatchers("/api/auth/forgot-password").permitAll()
