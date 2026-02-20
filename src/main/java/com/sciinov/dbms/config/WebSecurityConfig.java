@@ -3,6 +3,8 @@ package com.sciinov.dbms.config;
 import com.sciinov.dbms.security.AuthEntryPointJwt;
 import com.sciinov.dbms.security.AuthTokenFilter;
 import com.sciinov.dbms.security.UserDetailsServiceImpl;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -28,6 +30,9 @@ import java.util.List;
 @Configuration
 @EnableMethodSecurity
 public class WebSecurityConfig {
+
+    private static final Logger logger = LoggerFactory.getLogger(WebSecurityConfig.class);
+
     @Autowired
     UserDetailsServiceImpl userDetailsService;
 
@@ -105,6 +110,7 @@ public class WebSecurityConfig {
                 .map(String::trim)
                 .filter(origin -> !origin.isEmpty())
                 .toList();
+        logger.info("CORS allowed origins: {}", origins);
         configuration.setAllowedOrigins(origins);
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"));
         // Allow all headers that the frontend might send
