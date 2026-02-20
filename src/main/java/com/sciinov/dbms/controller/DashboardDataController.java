@@ -85,7 +85,7 @@ public class DashboardDataController {
 
     /**
      * Get dashboard data with advanced filtering options
-     * Supports date range, region, country, and emailDomain filters
+     * Supports date range and emailDomain filters
      */
     @GetMapping("/filter")
     @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
@@ -96,10 +96,8 @@ public class DashboardDataController {
             @RequestParam(required = false) Long toSerialNo,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
-            @RequestParam(required = false) String region,
-            @RequestParam(required = false) String country,
             @RequestParam(required = false) String emailDomain) {
-        logger.info("GET /api/dashboard-data/filter - Filtering data for conference: {} dashboard: {}", conferenceId, dashboardMasterId);
+        logger.info("GET /api/dashboard-data/filter - conference: {} dashboard: {}", conferenceId, dashboardMasterId);
         validateAccess(conferenceId);
 
         ExportFilterRequest filterRequest = new ExportFilterRequest();
@@ -109,15 +107,10 @@ public class DashboardDataController {
         filterRequest.setToSerialNo(toSerialNo);
         filterRequest.setStartDate(startDate);
         filterRequest.setEndDate(endDate);
-        filterRequest.setRegion(region);
-        filterRequest.setCountry(country);
         filterRequest.setEmailDomain(emailDomain);
 
         List<DashboardData> data = exportService.getFilteredData(filterRequest);
-        logger.info("GET /api/dashboard-data/filter - Retrieved {} filtered records", data.size());
-
-        // Log VIEW action
-        exportService.logViewAction(filterRequest, data.size());
+        logger.info("GET /api/dashboard-data/filter - Retrieved {} records", data.size());
 
         return ResponseEntity.ok(data);
     }
@@ -144,64 +137,12 @@ public class DashboardDataController {
 
         List<DashboardData> data = exportService.getFilteredData(filterRequest);
         logger.info("GET /api/dashboard-data/by-date - Retrieved {} records", data.size());
-
-        exportService.logViewAction(filterRequest, data.size());
         return ResponseEntity.ok(data);
     }
 
-    /**
-     * Get data by region
-     * Example: Get all data related to USA
-     */
-    @GetMapping("/by-region")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
-    public ResponseEntity<List<DashboardData>> getDataByRegion(
-            @RequestParam String conferenceId,
-            @RequestParam String dashboardMasterId,
-            @RequestParam String region) {
-        logger.info("GET /api/dashboard-data/by-region - Region filter: {}", region);
-        validateAccess(conferenceId);
-
-        ExportFilterRequest filterRequest = new ExportFilterRequest();
-        filterRequest.setConferenceId(conferenceId);
-        filterRequest.setDashboardMasterId(dashboardMasterId);
-        filterRequest.setRegion(region);
-
-        List<DashboardData> data = exportService.getFilteredData(filterRequest);
-        logger.info("GET /api/dashboard-data/by-region - Retrieved {} records", data.size());
-
-        exportService.logViewAction(filterRequest, data.size());
-        return ResponseEntity.ok(data);
-    }
 
     /**
-     * Get data by country
-     * Example: Get all data related to USA
-     */
-    @GetMapping("/by-country")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
-    public ResponseEntity<List<DashboardData>> getDataByCountry(
-            @RequestParam String conferenceId,
-            @RequestParam String dashboardMasterId,
-            @RequestParam String country) {
-        logger.info("GET /api/dashboard-data/by-country - Country filter: {}", country);
-        validateAccess(conferenceId);
-
-        ExportFilterRequest filterRequest = new ExportFilterRequest();
-        filterRequest.setConferenceId(conferenceId);
-        filterRequest.setDashboardMasterId(dashboardMasterId);
-        filterRequest.setCountry(country);
-
-        List<DashboardData> data = exportService.getFilteredData(filterRequest);
-        logger.info("GET /api/dashboard-data/by-country - Retrieved {} records", data.size());
-
-        exportService.logViewAction(filterRequest, data.size());
-        return ResponseEntity.ok(data);
-    }
-
-    /**
-     * Get data by email domain
-     * Example: Get all data related to USA
+     * Get data by email domain (e.g., emailDomain=gmail.com)
      */
     @GetMapping("/by-email-domain")
     @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
@@ -219,8 +160,6 @@ public class DashboardDataController {
 
         List<DashboardData> data = exportService.getFilteredData(filterRequest);
         logger.info("GET /api/dashboard-data/by-email-domain - Retrieved {} records", data.size());
-
-        exportService.logViewAction(filterRequest, data.size());
         return ResponseEntity.ok(data);
     }
 
@@ -236,8 +175,6 @@ public class DashboardDataController {
             @RequestParam(required = false) Long toSerialNo,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
-            @RequestParam(required = false) String region,
-            @RequestParam(required = false) String country,
             @RequestParam(required = false) String emailDomain) {
         logger.info("GET /api/dashboard-data/count - Counting filtered records");
         validateAccess(conferenceId);
@@ -249,8 +186,6 @@ public class DashboardDataController {
         filterRequest.setToSerialNo(toSerialNo);
         filterRequest.setStartDate(startDate);
         filterRequest.setEndDate(endDate);
-        filterRequest.setRegion(region);
-        filterRequest.setCountry(country);
         filterRequest.setEmailDomain(emailDomain);
 
         List<DashboardData> data = exportService.getFilteredData(filterRequest);

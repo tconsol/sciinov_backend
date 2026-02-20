@@ -78,7 +78,7 @@ public class ExportService {
     }
 
     /**
-     * Advanced export to Excel with date and region filtering
+     * Advanced export to Excel with date and email domain filtering
      */
     public void exportToExcelWithFilters(HttpServletResponse response, ExportFilterRequest filterRequest) throws IOException {
         List<DashboardData> dataList = getFilteredData(filterRequest);
@@ -86,7 +86,7 @@ public class ExportService {
     }
 
     /**
-     * Advanced export to PDF with date and region filtering
+     * Advanced export to PDF with date and email domain filtering
      */
     public void exportToPdfWithFilters(HttpServletResponse response, ExportFilterRequest filterRequest) throws IOException {
         List<DashboardData> dataList = getFilteredData(filterRequest);
@@ -126,15 +126,7 @@ public class ExportService {
             query.addCriteria(Criteria.where("createdAt").lte(endDateTime));
         }
 
-        // Region filter (case-insensitive)
-        if (filterRequest.getRegion() != null && !filterRequest.getRegion().isEmpty()) {
-            query.addCriteria(Criteria.where("region").regex(filterRequest.getRegion(), "i"));
-        }
 
-        // Country filter (case-insensitive)
-        if (filterRequest.getCountry() != null && !filterRequest.getCountry().isEmpty()) {
-            query.addCriteria(Criteria.where("country").regex(filterRequest.getCountry(), "i"));
-        }
 
         // Email domain filter (e.g., "gmail.com" matches "user@gmail.com")
         if (filterRequest.getEmailDomain() != null && !filterRequest.getEmailDomain().isEmpty()) {
@@ -149,36 +141,7 @@ public class ExportService {
     }
 
     /**
-     * Get list of distinct regions for a conference/dashboard
-     */
-    public List<String> getDistinctRegions(String conferenceId, String dashboardMasterId) {
-        Query query = new Query();
-        query.addCriteria(Criteria.where("conferenceId").is(conferenceId));
-        query.addCriteria(Criteria.where("dashboardMasterId").is(dashboardMasterId));
-        query.addCriteria(Criteria.where("deleted").is(false));
-        query.addCriteria(Criteria.where("region").ne(null));
 
-        return mongoTemplate.findDistinct(query, "region", DashboardData.class, String.class)
-                .stream()
-                .filter(r -> r != null && !r.isEmpty())
-                .collect(Collectors.toList());
-    }
-
-    /**
-     * Get list of distinct countries for a conference/dashboard
-     */
-    public List<String> getDistinctCountries(String conferenceId, String dashboardMasterId) {
-        Query query = new Query();
-        query.addCriteria(Criteria.where("conferenceId").is(conferenceId));
-        query.addCriteria(Criteria.where("dashboardMasterId").is(dashboardMasterId));
-        query.addCriteria(Criteria.where("deleted").is(false));
-        query.addCriteria(Criteria.where("country").ne(null));
-
-        return mongoTemplate.findDistinct(query, "country", DashboardData.class, String.class)
-                .stream()
-                .filter(c -> c != null && !c.isEmpty())
-                .collect(Collectors.toList());
-    }
 
     /**
      * Get list of distinct email domains (e.g., "gmail.com") for a conference/dashboard
@@ -211,9 +174,7 @@ public class ExportService {
         headerRow.createCell(0).setCellValue("Serial No");
         headerRow.createCell(1).setCellValue("Name");
         headerRow.createCell(2).setCellValue("Email");
-        headerRow.createCell(3).setCellValue("Region");
-        headerRow.createCell(4).setCellValue("Country");
-        headerRow.createCell(5).setCellValue("Upload Date");
+        headerRow.createCell(3).setCellValue("Upload Date");
 
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
@@ -223,13 +184,11 @@ public class ExportService {
             row.createCell(0).setCellValue(data.getSerialNo() != null ? data.getSerialNo() : 0);
             row.createCell(1).setCellValue(data.getName() != null ? data.getName() : "");
             row.createCell(2).setCellValue(data.getEmail() != null ? data.getEmail() : "");
-            row.createCell(3).setCellValue(data.getRegion() != null ? data.getRegion() : "");
-            row.createCell(4).setCellValue(data.getCountry() != null ? data.getCountry() : "");
-            row.createCell(5).setCellValue(data.getCreatedAt() != null ? data.getCreatedAt().format(formatter) : "");
+            row.createCell(3).setCellValue(data.getCreatedAt() != null ? data.getCreatedAt().format(formatter) : "");
         }
 
         // Auto-size columns
-        for (int i = 0; i < 6; i++) {
+        for (int i = 0; i < 4; i++) {
             sheet.autoSizeColumn(i);
         }
 
@@ -267,9 +226,9 @@ public class ExportService {
         info.setSpacingAfter(10);
         document.add(info);
 
-        PdfPTable table = new PdfPTable(6);
+        PdfPTable table = new PdfPTable(4);
         table.setWidthPercentage(100f);
-        table.setWidths(new float[] {1.0f, 2.5f, 3.0f, 1.5f, 1.5f, 2.0f});
+        table.setWidths(new float[] {1.0f, 2.5f, 4.0f, 2.0f});
         table.setSpacingBefore(10);
 
         writePdfHeader(table);
@@ -299,9 +258,6 @@ public class ExportService {
         cell.setPhrase(new Phrase("Email", font));
         table.addCell(cell);
 
-        cell.setPhrase(new Phrase("Region", font));
-        table.addCell(cell);
-
         cell.setPhrase(new Phrase("Country", font));
         table.addCell(cell);
 
@@ -315,15 +271,10 @@ public class ExportService {
             table.addCell(String.valueOf(data.getSerialNo() != null ? data.getSerialNo() : ""));
             table.addCell(data.getName() != null ? data.getName() : "");
             table.addCell(data.getEmail() != null ? data.getEmail() : "");
-            table.addCell(data.getRegion() != null ? data.getRegion() : "");
-            table.addCell(data.getCountry() != null ? data.getCountry() : "");
             table.addCell(data.getCreatedAt() != null ? data.getCreatedAt().format(formatter) : "");
         }
     }
-    
-    /**
-     * Build a human-readable filter summary from the filter request.
-     */
+
     private String buildFilterSummary(ExportFilterRequest fr) {
         StringBuilder sb = new StringBuilder();
         if (fr.getFromSerialNo() != null && fr.getToSerialNo() != null) {
@@ -336,12 +287,6 @@ public class ExportService {
         if (fr.getStartDate() != null || fr.getEndDate() != null) {
             sb.append("Date: ").append(fr.getStartDate() != null ? fr.getStartDate() : "any")
               .append(" to ").append(fr.getEndDate() != null ? fr.getEndDate() : "any").append("; ");
-        }
-        if (fr.getRegion() != null && !fr.getRegion().isEmpty()) {
-            sb.append("Region: ").append(fr.getRegion()).append("; ");
-        }
-        if (fr.getCountry() != null && !fr.getCountry().isEmpty()) {
-            sb.append("Country: ").append(fr.getCountry()).append("; ");
         }
         if (fr.getEmailDomain() != null && !fr.getEmailDomain().isEmpty()) {
             sb.append("Email Domain: ").append(fr.getEmailDomain()).append("; ");
@@ -387,12 +332,6 @@ public class ExportService {
         }
         if (fr.getEmailDomain() != null && !fr.getEmailDomain().isEmpty()) {
             desc.append(" | Email Domain: ").append(fr.getEmailDomain());
-        }
-        if (fr.getRegion() != null && !fr.getRegion().isEmpty()) {
-            desc.append(" | Region: ").append(fr.getRegion());
-        }
-        if (fr.getCountry() != null && !fr.getCountry().isEmpty()) {
-            desc.append(" | Country: ").append(fr.getCountry());
         }
         log.setDescription(desc.toString());
 

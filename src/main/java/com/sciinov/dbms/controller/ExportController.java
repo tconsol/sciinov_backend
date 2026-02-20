@@ -56,10 +56,7 @@ public class ExportController {
         logger.info("GET /api/export/pdf - PDF export completed");
     }
 
-    /**
-     * Advanced Excel export with date and region filtering
-     * Supports: date range, region, country, emailDomain filters
-     */
+    /** Advanced Excel export — supports date range and emailDomain filters */
     @GetMapping("/excel/advanced")
     @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
     public void exportToExcelAdvanced(HttpServletResponse response,
@@ -69,23 +66,15 @@ public class ExportController {
                                        @RequestParam(required = false) Long toSerialNo,
                                        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
                                        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
-                                       @RequestParam(required = false) String region,
-                                       @RequestParam(required = false) String country,
                                        @RequestParam(required = false) String emailDomain) throws IOException {
-        logger.info("GET /api/export/excel/advanced - Exporting to Excel with filters: {}", conferenceId);
+        logger.info("GET /api/export/excel/advanced - conferenceId: {}", conferenceId);
         validateAccess(conferenceId);
-
-        ExportFilterRequest filterRequest = buildFilterRequest(conferenceId, dashboardMasterId,
-                fromSerialNo, toSerialNo, startDate, endDate, region, country, emailDomain);
-
-        exportService.exportToExcelWithFilters(response, filterRequest);
-        logger.info("GET /api/export/excel/advanced - Excel export with filters completed");
+        exportService.exportToExcelWithFilters(response,
+                buildFilterRequest(conferenceId, dashboardMasterId, fromSerialNo, toSerialNo, startDate, endDate, emailDomain));
+        logger.info("GET /api/export/excel/advanced - completed");
     }
 
-    /**
-     * Advanced PDF export with date and region filtering
-     * Supports: date range, region, country, emailDomain filters
-     */
+    /** Advanced PDF export — supports date range and emailDomain filters */
     @GetMapping("/pdf/advanced")
     @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
     public void exportToPdfAdvanced(HttpServletResponse response,
@@ -95,17 +84,12 @@ public class ExportController {
                                      @RequestParam(required = false) Long toSerialNo,
                                      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
                                      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
-                                     @RequestParam(required = false) String region,
-                                     @RequestParam(required = false) String country,
                                      @RequestParam(required = false) String emailDomain) throws IOException {
-        logger.info("GET /api/export/pdf/advanced - Exporting to PDF with filters: {}", conferenceId);
+        logger.info("GET /api/export/pdf/advanced - conferenceId: {}", conferenceId);
         validateAccess(conferenceId);
-
-        ExportFilterRequest filterRequest = buildFilterRequest(conferenceId, dashboardMasterId,
-                fromSerialNo, toSerialNo, startDate, endDate, region, country, emailDomain);
-
-        exportService.exportToPdfWithFilters(response, filterRequest);
-        logger.info("GET /api/export/pdf/advanced - PDF export with filters completed");
+        exportService.exportToPdfWithFilters(response,
+                buildFilterRequest(conferenceId, dashboardMasterId, fromSerialNo, toSerialNo, startDate, endDate, emailDomain));
+        logger.info("GET /api/export/pdf/advanced - completed");
     }
 
     /**
@@ -134,9 +118,7 @@ public class ExportController {
         logger.info("POST /api/export/pdf/filter - PDF export with filter completed");
     }
 
-    /**
-     * Preview filtered data before export
-     */
+    /** Preview filtered data before export */
     @GetMapping("/preview")
     @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
     public ResponseEntity<List<DashboardData>> previewFilteredData(
@@ -146,69 +128,32 @@ public class ExportController {
             @RequestParam(required = false) Long toSerialNo,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
-            @RequestParam(required = false) String region,
-            @RequestParam(required = false) String country,
             @RequestParam(required = false) String emailDomain) {
-        logger.info("GET /api/export/preview - Previewing filtered data: {}", conferenceId);
+        logger.info("GET /api/export/preview - conferenceId: {}", conferenceId);
         validateAccess(conferenceId);
-
-        ExportFilterRequest filterRequest = buildFilterRequest(conferenceId, dashboardMasterId,
-                fromSerialNo, toSerialNo, startDate, endDate, region, country, emailDomain);
-
-        List<DashboardData> data = exportService.getFilteredData(filterRequest);
-        logger.info("GET /api/export/preview - Previewed data count: {}", data.size());
+        List<DashboardData> data = exportService.getFilteredData(
+                buildFilterRequest(conferenceId, dashboardMasterId, fromSerialNo, toSerialNo, startDate, endDate, emailDomain));
+        logger.info("GET /api/export/preview - count: {}", data.size());
         return ResponseEntity.ok(data);
     }
 
-    /**
-     * Get distinct regions for dropdown/filter options
-     */
-    @GetMapping("/regions")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
-    public ResponseEntity<List<String>> getDistinctRegions(
-            @RequestParam String conferenceId,
-            @RequestParam String dashboardMasterId) {
-        logger.info("GET /api/export/regions - Fetching distinct regions: {}", conferenceId);
-        validateAccess(conferenceId);
-        List<String> regions = exportService.getDistinctRegions(conferenceId, dashboardMasterId);
-        logger.info("GET /api/export/regions - Distinct regions count: {}", regions.size());
-        return ResponseEntity.ok(regions);
-    }
-
-    /**
-     * Get distinct countries for dropdown/filter options
-     */
-    @GetMapping("/countries")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
-    public ResponseEntity<List<String>> getDistinctCountries(
-            @RequestParam String conferenceId,
-            @RequestParam String dashboardMasterId) {
-        logger.info("GET /api/export/countries - Fetching distinct countries: {}", conferenceId);
-        validateAccess(conferenceId);
-        List<String> countries = exportService.getDistinctCountries(conferenceId, dashboardMasterId);
-        logger.info("GET /api/export/countries - Distinct countries count: {}", countries.size());
-        return ResponseEntity.ok(countries);
-    }
-
-    /**
-     * Get distinct email domains for dropdown/filter options
-     */
+    /** Get distinct email domains for dropdown/filter options */
     @GetMapping("/email-domains")
     @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
     public ResponseEntity<List<String>> getDistinctEmailDomains(
             @RequestParam String conferenceId,
             @RequestParam String dashboardMasterId) {
-        logger.info("GET /api/export/email-domains - Fetching distinct email domains: {}", conferenceId);
+        logger.info("GET /api/export/email-domains - conferenceId: {}", conferenceId);
         validateAccess(conferenceId);
         List<String> domains = exportService.getDistinctEmailDomains(conferenceId, dashboardMasterId);
-        logger.info("GET /api/export/email-domains - Distinct email domains count: {}", domains.size());
+        logger.info("GET /api/export/email-domains - count: {}", domains.size());
         return ResponseEntity.ok(domains);
     }
 
     private ExportFilterRequest buildFilterRequest(String conferenceId, String dashboardMasterId,
                                                     Long fromSerialNo, Long toSerialNo,
                                                     LocalDate startDate, LocalDate endDate,
-                                                    String region, String country, String emailDomain) {
+                                                    String emailDomain) {
         ExportFilterRequest request = new ExportFilterRequest();
         request.setConferenceId(conferenceId);
         request.setDashboardMasterId(dashboardMasterId);
@@ -216,8 +161,6 @@ public class ExportController {
         request.setToSerialNo(toSerialNo);
         request.setStartDate(startDate);
         request.setEndDate(endDate);
-        request.setRegion(region);
-        request.setCountry(country);
         request.setEmailDomain(emailDomain);
         return request;
     }

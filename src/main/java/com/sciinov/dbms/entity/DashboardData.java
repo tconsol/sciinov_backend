@@ -30,11 +30,6 @@ public class DashboardData {
     private String name;
     private String email;
 
-    @Indexed
-    private String region; // For region-specific filtering (e.g., USA, UK, India)
-
-    @Indexed
-    private String country; // Country for more specific filtering
 
     private boolean status;
     
@@ -60,10 +55,6 @@ public class DashboardData {
     public void setName(String name) { this.name = name; }
     public String getEmail() { return email; }
     public void setEmail(String email) { this.email = email; }
-    public String getRegion() { return region; }
-    public void setRegion(String region) { this.region = region; }
-    public String getCountry() { return country; }
-    public void setCountry(String country) { this.country = country; }
     public boolean isStatus() { return status; }
     public void setStatus(boolean status) { this.status = status; }
     public LocalDateTime getCreatedAt() { return createdAt; }

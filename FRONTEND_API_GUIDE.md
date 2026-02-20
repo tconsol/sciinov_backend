@@ -12,9 +12,10 @@
 4. [Conference Document Stats](#4-conference-document-stats)
 5. [Dashboard Data — View & Filter](#5-dashboard-data-view--filter)
 6. [Export — Excel & PDF Download](#6-export--excel--pdf-download)
-7. [Activity Logs](#7-activity-logs)
-8. [Upload Stats](#8-upload-stats)
-9. [User Management](#9-user-management)
+7. [Dashboard Data Activity Logs](#7-dashboard-data-activity-logs)
+8. [Conference Document Logs (Separate)](#8-conference-document-logs-separate)
+9. [Upload Stats](#9-upload-stats)
+10. [User Management](#10-user-management)
 
 ---
 
@@ -341,8 +342,6 @@ GET /api/dashboard-data?conferenceId={id}&dashboardMasterId={id}&fromSerialNo=1&
     "serialNo": 1,
     "name": "Alice",
     "email": "alice@gmail.com",
-    "region": "Asia",
-    "country": "India",
     "status": true,
     "createdAt": "2026-01-15T09:00:00"
   }
@@ -362,8 +361,6 @@ GET /api/dashboard-data/filter
 | `toSerialNo` | Long | `100` |
 | `startDate` | Date (ISO) | `2026-01-01` |
 | `endDate` | Date (ISO) | `2026-01-31` |
-| `region` | String | `Asia` |
-| `country` | String | `India` |
 | `emailDomain` | String | `gmail.com` |
 
 **Response:** Array of `DashboardData` objects.
@@ -379,23 +376,13 @@ GET /api/dashboard-data/by-email-domain?conferenceId={id}&dashboardMasterId={id}
 GET /api/dashboard-data/by-date?conferenceId={id}&dashboardMasterId={id}&startDate=2026-01-01&endDate=2026-01-31
 ```
 
-### 5.5 Filter by Region
-```
-GET /api/dashboard-data/by-region?conferenceId={id}&dashboardMasterId={id}&region=Asia
-```
-
-### 5.6 Filter by Country
-```
-GET /api/dashboard-data/by-country?conferenceId={id}&dashboardMasterId={id}&country=India
-```
-
-### 5.7 Get Count
+### 5.5 Get Count
 ```
 GET /api/dashboard-data/count?conferenceId={id}&dashboardMasterId={id}&fromSerialNo=1&toSerialNo=100&emailDomain=gmail.com
 ```
 **Response:** `100` (a number)
 
-### 5.8 Upload Excel Data (Admin)
+### 5.6 Upload Excel Data (Admin)
 ```
 POST /api/dashboard-data/upload
 Content-Type: multipart/form-data
@@ -443,8 +430,6 @@ GET /api/export/excel/advanced
 | `toSerialNo` | ❌ | `100` |
 | `startDate` | ❌ | `2026-01-01` |
 | `endDate` | ❌ | `2026-01-31` |
-| `region` | ❌ | `Asia` |
-| `country` | ❌ | `India` |
 | `emailDomain` | ❌ | `gmail.com` |
 
 **Response:** Binary `.xlsx` file download.
@@ -468,8 +453,6 @@ POST /api/export/excel/filter
   "toSerialNo": 100,
   "startDate": "2026-01-01",
   "endDate": "2026-01-31",
-  "region": "Asia",
-  "country": "India",
   "emailDomain": "gmail.com"
 }
 ```
@@ -486,19 +469,7 @@ GET /api/export/preview?conferenceId={id}&dashboardMasterId={id}&fromSerialNo=1&
 ```
 **Response:** Array of `DashboardData` objects (same as filter endpoint).
 
-### 6.8 Get Distinct Regions
-```
-GET /api/export/regions?conferenceId={id}&dashboardMasterId={id}
-```
-**Response:** `["Asia", "Europe", "North America"]`
-
-### 6.9 Get Distinct Countries
-```
-GET /api/export/countries?conferenceId={id}&dashboardMasterId={id}
-```
-**Response:** `["India", "Germany", "USA"]`
-
-### 6.10 Get Distinct Email Domains
+### 6.8 Get Distinct Email Domains
 ```
 GET /api/export/email-domains?conferenceId={id}&dashboardMasterId={id}
 ```
@@ -506,12 +477,13 @@ GET /api/export/email-domains?conferenceId={id}&dashboardMasterId={id}
 
 ---
 
-## 7. Activity Logs
+## 7. Dashboard Data Activity Logs
 
+> These logs are **only** for dashboard data operations (view, filter, download Excel/PDF).  
+> Conference document actions (upload/download/delete files) are logged **separately** — see [Section 8](#8-conference-document-logs-separate).  
 > Logs are always returned **latest first** (newest at top).
-> Each log includes: action type, serial range, total records, email domain used, full filter summary.
 
-### Log Object Structure
+### Dashboard Data Log Object
 ```json
 {
   "id": "log123",
@@ -531,23 +503,17 @@ GET /api/export/email-domains?conferenceId={id}&dashboardMasterId={id}
 }
 ```
 
-**`actionType` values:**
+**`actionType` values (dashboard data only):**
 | Value | Meaning |
 |-------|---------|
-| `VIEW` | Admin viewed/filtered data (did NOT download) |
-| `DOWNLOAD_EXCEL` | Admin downloaded Excel file |
-| `DOWNLOAD_PDF` | Admin downloaded PDF file |
-| `UPLOAD_EXCEL` | Admin uploaded Excel data file |
-| `UPLOAD_FILE` | Admin uploaded conference document (program/book/sheet) |
-| `DOWNLOAD_FILE` | Admin downloaded a conference document |
-| `DELETE_FILE` | Admin deleted a conference document |
-| `CREATE` | Record created |
-| `UPDATE` | Record updated |
-| `DELETE` | Record deleted |
+| `VIEW` | Admin viewed/filtered dashboard data (did NOT download) |
+| `DOWNLOAD_EXCEL` | Admin downloaded Excel file of dashboard data |
+| `DOWNLOAD_PDF` | Admin downloaded PDF file of dashboard data |
+| `UPLOAD_EXCEL` | Admin uploaded an Excel data file to dashboard |
 
 ---
 
-### 7.1 Get My Activity Logs (Admin — own logs)
+### 7.1 Get My Dashboard Data Logs (Admin — own logs)
 ```
 GET /api/analytics/logs/me
 Authorization: Bearer <ADMIN_TOKEN>
@@ -576,7 +542,7 @@ Authorization: Bearer <ADMIN_TOKEN>
 }
 ```
 
-### 7.3 Get All Activity Logs (Super Admin)
+### 7.3 Get All Dashboard Data Logs (Super Admin)
 ```
 GET /api/analytics/logs
 Authorization: Bearer <SUPER_ADMIN_TOKEN>
@@ -604,11 +570,139 @@ Authorization: Bearer <SUPER_ADMIN_TOKEN>
 
 ---
 
-## 8. Upload Stats
+## 8. Conference Document Logs (Separate)
+
+> These logs are **completely separate** from dashboard data logs.  
+> Every **upload**, **download**, **delete**, and **view of a specific document** is recorded here.  
+> **VIEW logs are created only when clicking to view a specific document** (via `GET /api/conference-documents/{id}`), NOT when listing documents.  
+> Logs always returned **latest first** (newest at top).  
+> **Admin** can only see their own logs. **Super Admin** can see all.
+
+### Conference Document Log Object
+```json
+{
+  "id": "doclog123",
+  "adminId": "admin1",
+  "adminName": "John Doe",
+  "conferenceId": "conf123",
+  "conferenceName": "ICSE 2026",
+  "documentId": "doc456",
+  "fileName": "program.pdf",
+  "documentType": "PROGRAM",
+  "year": 2026,
+  "actionType": "UPLOAD",
+  "description": "Uploaded Program 'program.pdf' (Year: 2026) for ICSE 2026",
+  "ipAddress": "192.168.1.1",
+  "createdAt": "2026-02-20T10:30:00"
+}
+```
+
+**`actionType` values:**
+| Value | Meaning |
+|-------|---------|
+| `UPLOAD` | Admin uploaded a conference document file |
+| `DOWNLOAD` | Admin downloaded a conference document file |
+| `DELETE` | Admin deleted a conference document file |
+| `VIEW` | Admin viewed/listed conference documents |
+
+---
+
+### 8.1 Get My Conference Document Logs (Admin — own logs)
+```
+GET /api/analytics/doc-logs/me
+Authorization: Bearer <ADMIN_TOKEN>
+```
+**Response:**
+```json
+{
+  "success": true,
+  "count": 8,
+  "data": [
+    {
+      "id": "doclog123",
+      "adminId": "admin1",
+      "adminName": "John Doe",
+      "conferenceId": "conf123",
+      "conferenceName": "ICSE 2026",
+      "documentId": "doc456",
+      "fileName": "program.pdf",
+      "documentType": "PROGRAM",
+      "year": 2026,
+      "actionType": "UPLOAD",
+      "description": "Uploaded Program 'program.pdf' (Year: 2026) for ICSE 2026",
+      "ipAddress": "192.168.1.1",
+      "createdAt": "2026-02-20T10:30:00"
+    }
+  ]
+}
+```
+
+### 8.2 Get My Document Logs for Specific Conference (Admin)
+```
+GET /api/analytics/doc-logs/me/conference/{conferenceId}
+Authorization: Bearer <ADMIN_TOKEN>
+```
+**Response:**
+```json
+{
+  "success": true,
+  "conferenceId": "conf123",
+  "count": 3,
+  "data": [ /* array of doc-log objects, latest first */ ]
+}
+```
+
+### 8.3 Get All Conference Document Logs (Super Admin)
+```
+GET /api/analytics/doc-logs
+Authorization: Bearer <SUPER_ADMIN_TOKEN>
+```
+**Response:**
+```json
+{
+  "success": true,
+  "count": 50,
+  "data": [ /* all doc-log objects across all admins, latest first */ ]
+}
+```
+
+### 8.4 Get Document Logs by Admin (Super Admin)
+```
+GET /api/analytics/doc-logs/admin/{adminId}
+Authorization: Bearer <SUPER_ADMIN_TOKEN>
+```
+**Response:**
+```json
+{
+  "success": true,
+  "adminId": "admin1",
+  "count": 12,
+  "data": [ /* doc-log objects for that admin, latest first */ ]
+}
+```
+
+### 8.5 Get Document Logs by Conference (Super Admin)
+```
+GET /api/analytics/doc-logs/conference/{conferenceId}
+Authorization: Bearer <SUPER_ADMIN_TOKEN>
+```
+**Response:**
+```json
+{
+  "success": true,
+  "conferenceId": "conf123",
+  "count": 20,
+  "data": [ /* doc-log objects for that conference, latest first */ ]
+}
+```
+
+---
+
+## 9. Upload Stats
 
 > Stats for dashboard Excel data uploads (not conference documents).
 
-### 8.1 My Upload Stats (Admin)
+### 9.1 My Upload Stats (Admin)
 ```
 GET /api/analytics/upload-stats/me
 Authorization: Bearer <ADMIN_TOKEN>
@@ -635,43 +729,43 @@ Authorization: Bearer <ADMIN_TOKEN>
 }
 ```
 
-### 8.2 My Stats for a Conference (Admin)
+### 9.2 My Stats for a Conference (Admin)
 ```
 GET /api/analytics/upload-stats/me/conference/{conferenceId}
 ```
 
-### 8.3 All Upload Stats (Super Admin)
+### 9.3 All Upload Stats (Super Admin)
 ```
 GET /api/analytics/upload-stats
 Authorization: Bearer <SUPER_ADMIN_TOKEN>
 ```
 
-### 8.4 Stats by Admin (Super Admin)
+### 9.4 Stats by Admin (Super Admin)
 ```
 GET /api/analytics/upload-stats/admin/{adminId}
 ```
 
-### 8.5 Stats by Conference (Super Admin)
+### 9.5 Stats by Conference (Super Admin)
 ```
 GET /api/analytics/upload-stats/conference/{conferenceId}
 ```
 
 ---
 
-## 9. User Management
+## 10. User Management
 
-### 9.1 Get All Users (Super Admin)
+### 10.1 Get All Users (Super Admin)
 ```
 GET /api/users
 Authorization: Bearer <SUPER_ADMIN_TOKEN>
 ```
 
-### 9.2 Get User by ID
+### 10.2 Get User by ID
 ```
 GET /api/users/{userId}
 ```
 
-### 9.3 Create Admin User (Super Admin)
+### 10.3 Create Admin User (Super Admin)
 ```
 POST /api/users
 ```
@@ -688,17 +782,17 @@ POST /api/users
 }
 ```
 
-### 9.4 Update User (Super Admin)
+### 10.4 Update User (Super Admin)
 ```
 PUT /api/users/{userId}
 ```
 
-### 9.5 Delete User (Super Admin)
+### 10.5 Delete User (Super Admin)
 ```
 DELETE /api/users/{userId}
 ```
 
-### 9.6 Assign Conference to Admin (Super Admin)
+### 10.6 Assign Conference to Admin (Super Admin)
 ```
 PUT /api/users/{userId}/assign-conference/{conferenceId}
 ```
@@ -736,10 +830,45 @@ PUT /api/users/{userId}/assign-conference/{conferenceId}
 | `emailDomain` filter on all data view/export endpoints | ✅ Added |
 | `GET /api/export/email-domains` — get distinct email domains | ✅ Added |
 | `GET /api/dashboard-data/by-email-domain` — filter by domain | ✅ Added |
-| VIEW logs recorded when admin views/filters data (not just downloads) | ✅ Added |
+| Region concept removed from all entities, DTOs, queries, exports | ✅ Removed |
+| **Country concept removed from DashboardData entity** | ✅ Removed |
+| VIEW logs recorded when admin views/filters dashboard data | ✅ Added |
 | Download logs include: serial range, total records, email domain, filter summary | ✅ Added |
 | All logs returned latest first (newest on top) | ✅ Fixed |
-| `emailDomain` param in export advanced/filter/preview endpoints | ✅ Added |
+| **Conference document logs now in separate collection `conference_document_logs`** | ✅ Added |
+| `GET /api/analytics/doc-logs/me` — admin own document logs | ✅ Added |
+| `GET /api/analytics/doc-logs/me/conference/{id}` — admin own doc logs per conference | ✅ Added |
+| `GET /api/analytics/doc-logs` — super admin all document logs | ✅ Added |
+| `GET /api/analytics/doc-logs/admin/{adminId}` — super admin views specific admin's doc logs | ✅ Added |
+| `GET /api/analytics/doc-logs/conference/{id}` — super admin views conference doc logs | ✅ Added |
+| Upload/Download/Delete/View of conference documents logged to `conference_document_logs` | ✅ Added |
+| Dashboard data logs (`admin_activity_logs`) no longer mixed with document logs | ✅ Fixed |
 | Blob name stored in DB after file upload | ✅ (see ConferenceDocument entity) |
 | Delete file → removes from DB and GCS bucket | ✅ (see ConferenceDocumentController) |
+| DashboardData now stores only: `serialNo`, `name`, `email`, `status`, `createdAt`, `updatedAt` | ✅ Simplified |
+
+---
+
+## Dashboard Data Entity Structure
+
+**DashboardData fields:**
+- `serialNo` (Long): Unique serial number
+- `name` (String): Person/entity name
+- `email` (String): Email address
+- `status` (Boolean): Active/inactive status
+- `createdAt` (LocalDateTime): Record creation timestamp
+
+**Excel upload format** (via `/api/dashboard-data/upload`):
+- Column 0: **Name** (required)
+- Column 1: **Email** (required)
+- No other columns are read or stored
+
+---
+
+## Log Collections Summary
+
+| Collection | What is logged | Who can access |
+|------------|---------------|----------------|
+| `admin_activity_logs` | Dashboard data: VIEW, DOWNLOAD_EXCEL, DOWNLOAD_PDF, UPLOAD_EXCEL | Admin (own) via `/api/analytics/logs/me`; Super Admin (all) via `/api/analytics/logs` |
+| `conference_document_logs` | Conference files: UPLOAD, DOWNLOAD, DELETE, VIEW | Admin (own) via `/api/analytics/doc-logs/me`; Super Admin (all) via `/api/analytics/doc-logs` |
 

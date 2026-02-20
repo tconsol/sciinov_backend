@@ -3,6 +3,7 @@ package com.sciinov.dbms.service;
 import com.sciinov.dbms.entity.AdminActivityLog;
 import com.sciinov.dbms.entity.Conference;
 import com.sciinov.dbms.entity.ConferenceDocument;
+import com.sciinov.dbms.entity.ConferenceDocumentLog;
 import com.sciinov.dbms.entity.DashboardUploadStats;
 import com.sciinov.dbms.repository.AdminActivityLogRepository;
 import com.sciinov.dbms.repository.ConferenceRepository;
@@ -38,6 +39,9 @@ public class ConferenceDocumentService {
 
     @Autowired
     private AdminActivityLogRepository adminActivityLogRepository;
+
+    @Autowired
+    private ConferenceDocumentLogService conferenceDocumentLogService;
 
     @Autowired
     private DashboardUploadStatsRepository dashboardUploadStatsRepository;
@@ -115,11 +119,9 @@ public class ConferenceDocumentService {
         logger.info("Uploaded conference document - Conference: {}, Year: {}, Type: {}, File: {}",
             conference.getTitle(), year, documentType, file.getOriginalFilename());
 
-        // Log activity
-        logActivity(userId, userName, conferenceId, null,
-            AdminActivityLog.ActionType.UPLOAD_FILE,
-            "Uploaded " + documentType.getDisplayName() + " document '" + file.getOriginalFilename() + "' for year " + year,
-            ipAddress);
+        // Log to conference document logs (separate from data logs)
+        conferenceDocumentLogService.log(userId, userName, ipAddress,
+            ConferenceDocumentLog.ActionType.UPLOAD, saved);
 
         // Record upload stats
         recordUploadStats(userId, conferenceId, null, file.getOriginalFilename());
@@ -255,10 +257,8 @@ public class ConferenceDocumentService {
     public byte[] downloadDocument(String documentId, String userId, String userName, String ipAddress) throws IOException {
         byte[] content = downloadDocument(documentId);
         Optional<ConferenceDocument> docOpt = getDocumentById(documentId);
-        docOpt.ifPresent(doc -> logActivity(userId, userName, doc.getConferenceId(), null,
-            AdminActivityLog.ActionType.DOWNLOAD_FILE,
-            "Downloaded " + doc.getDocumentType().getDisplayName() + " document '" + doc.getFileName() + "' for year " + doc.getYear(),
-            ipAddress));
+        docOpt.ifPresent(doc -> conferenceDocumentLogService.log(userId, userName, ipAddress,
+            ConferenceDocumentLog.ActionType.DOWNLOAD, doc));
         return content;
     }
 
@@ -303,10 +303,9 @@ public class ConferenceDocumentService {
         }
         ConferenceDocument doc = docOpt.get();
         deleteDocument(documentId);
-        logActivity(userId, userName, doc.getConferenceId(), null,
-            AdminActivityLog.ActionType.DELETE_FILE,
-            "Deleted " + doc.getDocumentType().getDisplayName() + " document '" + doc.getFileName() + "' for year " + doc.getYear(),
-            ipAddress);
+        // Log to conference document logs (separate from data logs)
+        conferenceDocumentLogService.log(userId, userName, ipAddress,
+            ConferenceDocumentLog.ActionType.DELETE, doc);
     }
 
     /**

@@ -14,9 +14,6 @@ public class ExportFilterRequest {
     private LocalDate startDate;
     private LocalDate endDate;
 
-    // Region/Country filter
-    private String region;
-    private String country;
 
     // Email domain filter (e.g., "gmail.com")
     private String emailDomain;
@@ -34,10 +31,6 @@ public class ExportFilterRequest {
     public void setStartDate(LocalDate startDate) { this.startDate = startDate; }
     public LocalDate getEndDate() { return endDate; }
     public void setEndDate(LocalDate endDate) { this.endDate = endDate; }
-    public String getRegion() { return region; }
-    public void setRegion(String region) { this.region = region; }
-    public String getCountry() { return country; }
-    public void setCountry(String country) { this.country = country; }
     public String getEmailDomain() { return emailDomain; }
     public void setEmailDomain(String emailDomain) { this.emailDomain = emailDomain; }
 }

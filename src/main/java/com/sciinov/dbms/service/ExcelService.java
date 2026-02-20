@@ -66,8 +66,6 @@ public class ExcelService {
 
                 String name = getCellValue(currentRow.getCell(0));
                 String email = getCellValue(currentRow.getCell(1));
-                String region = getCellValue(currentRow.getCell(2));  // Optional region column
-                String country = getCellValue(currentRow.getCell(3)); // Optional country column
 
                 if (name != null && email != null && !name.isEmpty() && !email.isEmpty()) {
                     Optional<DashboardData> existingData = dashboardDataRepository
@@ -81,8 +79,6 @@ public class ExcelService {
                         data.setDashboardMasterId(dashboardMasterId);
                         data.setName(name);
                         data.setEmail(email);
-                        data.setRegion(region != null && !region.isEmpty() ? region : null);
-                        data.setCountry(country != null && !country.isEmpty() ? country : null);
                         data.setStatus(true);
                         data.setCreatedAt(LocalDateTime.now());
                         data.setUpdatedAt(LocalDateTime.now());

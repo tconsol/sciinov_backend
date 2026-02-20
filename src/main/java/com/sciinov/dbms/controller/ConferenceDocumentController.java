@@ -2,8 +2,10 @@ package com.sciinov.dbms.controller;
 
 import com.sciinov.dbms.dto.ConferenceDocumentResponse;
 import com.sciinov.dbms.entity.ConferenceDocument;
+import com.sciinov.dbms.entity.ConferenceDocumentLog;
 import com.sciinov.dbms.entity.User;
 import com.sciinov.dbms.security.UserDetailsImpl;
+import com.sciinov.dbms.service.ConferenceDocumentLogService;
 import com.sciinov.dbms.service.ConferenceDocumentService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -34,6 +36,9 @@ public class ConferenceDocumentController {
 
     @Autowired
     private ConferenceDocumentService conferenceDocumentService;
+
+    @Autowired
+    private ConferenceDocumentLogService conferenceDocumentLogService;
 
     // ─────────────────────────────────────────────────────────────────
     // Helper: get authenticated user details
@@ -307,14 +312,27 @@ public class ConferenceDocumentController {
     @GetMapping("/{id}")
     @PreAuthorize("isAuthenticated()")
     @Operation(summary = "Get document by ID")
-    public ResponseEntity<?> getDocumentById(@PathVariable String id) {
+    public ResponseEntity<?> getDocumentById(
+            @PathVariable String id,
+            @RequestHeader(value = "X-Forwarded-For", required = false) String xForwardedFor,
+            jakarta.servlet.http.HttpServletRequest request) {
         try {
             Optional<ConferenceDocument> docOpt = conferenceDocumentService.getDocumentById(id);
             if (docOpt.isEmpty()) {
                 return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("success", false, "message", "Document not found"));
             }
-            validateConferenceAccess(docOpt.get().getConferenceId());
-            return ResponseEntity.ok(Map.of("success", true, "data", new ConferenceDocumentResponse(docOpt.get())));
+            ConferenceDocument doc = docOpt.get();
+            validateConferenceAccess(doc.getConferenceId());
+
+            // Log VIEW action for this specific document
+            UserDetailsImpl ud = getCurrentUser();
+            conferenceDocumentLogService.log(ud.getId(),
+                ud.getUser().getFirstName() + " " + ud.getUser().getLastName(),
+                getClientIpAddress(xForwardedFor, request),
+                ConferenceDocumentLog.ActionType.VIEW,
+                doc);
+
+            return ResponseEntity.ok(Map.of("success", true, "data", new ConferenceDocumentResponse(doc)));
         } catch (AccessDeniedException e) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("success", false, "message", e.getMessage()));
         } catch (Exception e) {
