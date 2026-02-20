@@ -8,10 +8,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
@@ -25,6 +28,9 @@ public class ConferenceService {
 
     @Autowired
     private DashboardMasterRepository dashboardMasterRepository;
+
+    @Autowired
+    private GoogleCloudStorageService gcsService;
 
     public List<Conference> getAllConferences() {
         return conferenceRepository.findByDeletedFalse();
@@ -156,6 +162,43 @@ public class ConferenceService {
 
         Conference updated = conferenceRepository.save(conference);
         logger.info("Successfully set dashboards for conference: {}", conferenceId);
+
+        return updated;
+    }
+
+    /**
+     * Upload conference image
+     * If conference already has an image, delete it from GCS and update the URL
+     */
+    public Conference uploadConferenceImage(String conferenceId, MultipartFile imageFile) throws IOException {
+        logger.info("Uploading image for conference: {}", conferenceId);
+
+        Conference conference = conferenceRepository.findByIdAndDeletedFalse(conferenceId)
+                .orElseThrow(() -> new RuntimeException("Conference not found: " + conferenceId));
+
+        // Delete previous image from GCS if exists
+        if (conference.getImageBlobName() != null && !conference.getImageBlobName().isEmpty()) {
+            try {
+                gcsService.deleteFile(conference.getImageBlobName());
+                logger.info("Deleted previous image from GCS: {}", conference.getImageBlobName());
+            } catch (Exception e) {
+                logger.warn("Failed to delete previous image from GCS: {}", e.getMessage());
+            }
+        }
+
+        // Upload new image to GCS
+        String folderPath = String.format("conferences/%s/", conference.getTitle().toLowerCase().replaceAll("[^a-z0-9\\s-]", "").replaceAll("\\s+", "-"));
+        Map<String, String> uploadResult = gcsService.uploadFileAndGetBlobName(imageFile, folderPath);
+        String blobName = uploadResult.get("blobName");
+        String signedUrl = uploadResult.get("signedUrl");
+
+        // Update conference with new image
+        conference.setImageBlobName(blobName);
+        conference.setImageUrl(signedUrl);
+        conference.setUpdatedAt(LocalDateTime.now());
+
+        Conference updated = conferenceRepository.save(conference);
+        logger.info("Successfully uploaded image for conference: {}, Blob: {}", conferenceId, blobName);
 
         return updated;
     }

@@ -15,9 +15,12 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 @CrossOrigin(origins = "*", maxAge = 3600)
 @RestController
@@ -228,6 +231,67 @@ public class ConferenceController {
                     null, null, null, e.getMessage(), false
             );
             return ResponseEntity.badRequest().body(response);
+        }
+    }
+
+    /**
+     * Upload conference image
+     * POST /api/conferences/{id}/upload-image
+     * If conference already has an image, it will be deleted and replaced
+     */
+    @PostMapping("/{id}/upload-image")
+    @PreAuthorize("hasRole('SUPER_ADMIN') or hasRole('ADMIN')")
+    public ResponseEntity<Map<String, Object>> uploadConferenceImage(
+            @PathVariable String id,
+            @RequestParam("image") MultipartFile imageFile) {
+        logger.info("POST /api/conferences/{}/upload-image - Uploading image for conference", id);
+        try {
+            if (imageFile.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of(
+                    "success", false,
+                    "message", "Image file is empty"
+                ));
+            }
+
+            // Check file type
+            String contentType = imageFile.getContentType();
+            if (contentType == null || !contentType.startsWith("image/")) {
+                return ResponseEntity.badRequest().body(Map.of(
+                    "success", false,
+                    "message", "File must be an image (JPEG, PNG, GIF, WebP, etc.)"
+                ));
+            }
+
+            // Upload image
+            Conference updated = conferenceService.uploadConferenceImage(id, imageFile);
+
+            logger.info("POST /api/conferences/{}/upload-image - Image uploaded successfully", id);
+            return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "Conference image uploaded successfully",
+                "conferenceId", updated.getId(),
+                "conferenceName", updated.getTitle(),
+                "imageUrl", updated.getImageUrl(),
+                "imageBlobName", updated.getImageBlobName()
+            ));
+        } catch (IOException e) {
+            logger.error("POST /api/conferences/{}/upload-image - IO error: {}", id, e.getMessage());
+            return ResponseEntity.status(500).body(Map.of(
+                "success", false,
+                "message", "Failed to upload image: " + e.getMessage()
+            ));
+        } catch (RuntimeException e) {
+            logger.error("POST /api/conferences/{}/upload-image - Error: {}", id, e.getMessage());
+            return ResponseEntity.status(400).body(Map.of(
+                "success", false,
+                "message", e.getMessage()
+            ));
+        } catch (Exception e) {
+            logger.error("POST /api/conferences/{}/upload-image - Unexpected error: {}", id, e.getMessage());
+            return ResponseEntity.status(500).body(Map.of(
+                "success", false,
+                "message", "Unexpected error: " + e.getMessage()
+            ));
         }
     }
 }

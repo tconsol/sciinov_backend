@@ -15,7 +15,8 @@
 7. [Dashboard Data Activity Logs](#7-dashboard-data-activity-logs)
 8. [Conference Document Logs (Separate)](#8-conference-document-logs-separate)
 9. [Upload Stats](#9-upload-stats)
-10. [User Management](#10-user-management)
+10. [Conference Image Upload](#10-conference-image-upload)
+11. [User Management](#11-user-management)
 
 ---
 
@@ -752,20 +753,74 @@ GET /api/analytics/upload-stats/conference/{conferenceId}
 
 ---
 
-## 10. User Management
+## 10. Conference Image Upload
 
-### 10.1 Get All Users (Super Admin)
+> Upload a conference image. If the conference already has an image, the old one is automatically deleted from the bucket and replaced with the new one.  
+> **Only one image per conference** — new uploads overwrite the previous image.  
+> Supported formats: JPEG, PNG, GIF, WebP, etc.
+
+### 10.1 Upload Conference Image
+
+```
+POST /api/conferences/{conferenceId}/upload-image
+Content-Type: multipart/form-data
+Authorization: Bearer <ADMIN_OR_SUPER_ADMIN_TOKEN>
+```
+
+**Path Parameters:**
+| Param | Type | Example |
+|-------|------|---------|
+| `conferenceId` | String | `conf123` |
+
+**Form Data:**
+| Field | Type | Required | Example |
+|-------|------|----------|---------|
+| `image` | File | ✅ | image.png |
+
+**Response (Success):**
+```json
+{
+  "success": true,
+  "message": "Conference image uploaded successfully",
+  "conferenceId": "conf123",
+  "conferenceName": "ICSE 2026",
+  "imageUrl": "https://storage.googleapis.com/sciinovfiles/conferences/icse-2026/image_1708424268.png?X-Goog-Algorithm=...",
+  "imageBlobName": "conferences/icse-2026/image_1708424268.png"
+}
+```
+
+**Response (Error - Not Image):**
+```json
+{
+  "success": false,
+  "message": "File must be an image (JPEG, PNG, GIF, WebP, etc.)"
+}
+```
+
+**Response (Error - Conference Not Found):**
+```json
+{
+  "success": false,
+  "message": "Conference not found: conf123"
+}
+```
+
+---
+
+## 11. User Management
+
+### 11.1 Get All Users (Super Admin)
 ```
 GET /api/users
 Authorization: Bearer <SUPER_ADMIN_TOKEN>
 ```
 
-### 10.2 Get User by ID
+### 11.2 Get User by ID
 ```
 GET /api/users/{userId}
 ```
 
-### 10.3 Create Admin User (Super Admin)
+### 11.3 Create Admin User (Super Admin)
 ```
 POST /api/users
 ```
@@ -782,17 +837,17 @@ POST /api/users
 }
 ```
 
-### 10.4 Update User (Super Admin)
+### 11.4 Update User (Super Admin)
 ```
 PUT /api/users/{userId}
 ```
 
-### 10.5 Delete User (Super Admin)
+### 11.5 Delete User (Super Admin)
 ```
 DELETE /api/users/{userId}
 ```
 
-### 10.6 Assign Conference to Admin (Super Admin)
+### 11.6 Assign Conference to Admin (Super Admin)
 ```
 PUT /api/users/{userId}/assign-conference/{conferenceId}
 ```
@@ -846,6 +901,9 @@ PUT /api/users/{userId}/assign-conference/{conferenceId}
 | Blob name stored in DB after file upload | ✅ (see ConferenceDocument entity) |
 | Delete file → removes from DB and GCS bucket | ✅ (see ConferenceDocumentController) |
 | DashboardData now stores only: `serialNo`, `name`, `email`, `status`, `createdAt`, `updatedAt` | ✅ Simplified |
+| **Conference image upload endpoint** | ✅ Added |
+| **Auto-delete previous image when uploading new one** | ✅ Added |
+| **Store image URL and blob name in Conference entity** | ✅ Added |
 
 ---
 

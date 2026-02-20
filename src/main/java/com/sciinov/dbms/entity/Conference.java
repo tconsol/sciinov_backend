@@ -15,6 +15,7 @@ public class Conference {
     private String id;
     private String title;
     private String imageUrl;
+    private String imageBlobName; // GCS blob name for the conference image
     private Status status; // ACTIVE / INACTIVE
     
     // List of Dashboard Master IDs associated with this conference
@@ -39,6 +40,8 @@ public class Conference {
     public void setTitle(String title) { this.title = title; }
     public String getImageUrl() { return imageUrl; }
     public void setImageUrl(String imageUrl) { this.imageUrl = imageUrl; }
+    public String getImageBlobName() { return imageBlobName; }
+    public void setImageBlobName(String imageBlobName) { this.imageBlobName = imageBlobName; }
     public Status getStatus() { return status; }
     public void setStatus(Status status) { this.status = status; }
     public List<String> getDashboardMasterIds() { return dashboardMasterIds; }
