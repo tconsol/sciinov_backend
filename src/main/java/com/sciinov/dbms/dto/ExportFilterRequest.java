@@ -18,6 +18,9 @@ public class ExportFilterRequest {
     private String region;
     private String country;
 
+    // Email domain filter (e.g., "gmail.com")
+    private String emailDomain;
+
     // Getters and Setters
     public String getConferenceId() { return conferenceId; }
     public void setConferenceId(String conferenceId) { this.conferenceId = conferenceId; }
@@ -35,5 +38,7 @@ public class ExportFilterRequest {
     public void setRegion(String region) { this.region = region; }
     public String getCountry() { return country; }
     public void setCountry(String country) { this.country = country; }
+    public String getEmailDomain() { return emailDomain; }
+    public void setEmailDomain(String emailDomain) { this.emailDomain = emailDomain; }
 }
 

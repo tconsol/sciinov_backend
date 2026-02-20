@@ -60,7 +60,7 @@ public class AnalyticsService {
     }
 
     public List<AdminActivityLog> getActivityLogsByAdminAndConference(String adminId, String conferenceId) {
-        List<AdminActivityLog> logs = adminActivityLogRepository.findByAdminIdAndConferenceId(adminId, conferenceId);
+        List<AdminActivityLog> logs = adminActivityLogRepository.findByAdminIdAndConferenceIdOrderByCreatedAtDesc(adminId, conferenceId);
         return populateAdminNames(logs);
     }
 

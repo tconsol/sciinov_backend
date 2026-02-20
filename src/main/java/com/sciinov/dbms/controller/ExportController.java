@@ -58,7 +58,7 @@ public class ExportController {
 
     /**
      * Advanced Excel export with date and region filtering
-     * Supports: date range, region, country filters
+     * Supports: date range, region, country, emailDomain filters
      */
     @GetMapping("/excel/advanced")
     @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
@@ -70,12 +70,13 @@ public class ExportController {
                                        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
                                        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
                                        @RequestParam(required = false) String region,
-                                       @RequestParam(required = false) String country) throws IOException {
+                                       @RequestParam(required = false) String country,
+                                       @RequestParam(required = false) String emailDomain) throws IOException {
         logger.info("GET /api/export/excel/advanced - Exporting to Excel with filters: {}", conferenceId);
         validateAccess(conferenceId);
 
         ExportFilterRequest filterRequest = buildFilterRequest(conferenceId, dashboardMasterId,
-                fromSerialNo, toSerialNo, startDate, endDate, region, country);
+                fromSerialNo, toSerialNo, startDate, endDate, region, country, emailDomain);
 
         exportService.exportToExcelWithFilters(response, filterRequest);
         logger.info("GET /api/export/excel/advanced - Excel export with filters completed");
@@ -83,7 +84,7 @@ public class ExportController {
 
     /**
      * Advanced PDF export with date and region filtering
-     * Supports: date range, region, country filters
+     * Supports: date range, region, country, emailDomain filters
      */
     @GetMapping("/pdf/advanced")
     @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
@@ -95,12 +96,13 @@ public class ExportController {
                                      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
                                      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
                                      @RequestParam(required = false) String region,
-                                     @RequestParam(required = false) String country) throws IOException {
+                                     @RequestParam(required = false) String country,
+                                     @RequestParam(required = false) String emailDomain) throws IOException {
         logger.info("GET /api/export/pdf/advanced - Exporting to PDF with filters: {}", conferenceId);
         validateAccess(conferenceId);
 
         ExportFilterRequest filterRequest = buildFilterRequest(conferenceId, dashboardMasterId,
-                fromSerialNo, toSerialNo, startDate, endDate, region, country);
+                fromSerialNo, toSerialNo, startDate, endDate, region, country, emailDomain);
 
         exportService.exportToPdfWithFilters(response, filterRequest);
         logger.info("GET /api/export/pdf/advanced - PDF export with filters completed");
@@ -145,12 +147,13 @@ public class ExportController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(required = false) String region,
-            @RequestParam(required = false) String country) {
+            @RequestParam(required = false) String country,
+            @RequestParam(required = false) String emailDomain) {
         logger.info("GET /api/export/preview - Previewing filtered data: {}", conferenceId);
         validateAccess(conferenceId);
 
         ExportFilterRequest filterRequest = buildFilterRequest(conferenceId, dashboardMasterId,
-                fromSerialNo, toSerialNo, startDate, endDate, region, country);
+                fromSerialNo, toSerialNo, startDate, endDate, region, country, emailDomain);
 
         List<DashboardData> data = exportService.getFilteredData(filterRequest);
         logger.info("GET /api/export/preview - Previewed data count: {}", data.size());
@@ -187,10 +190,25 @@ public class ExportController {
         return ResponseEntity.ok(countries);
     }
 
+    /**
+     * Get distinct email domains for dropdown/filter options
+     */
+    @GetMapping("/email-domains")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
+    public ResponseEntity<List<String>> getDistinctEmailDomains(
+            @RequestParam String conferenceId,
+            @RequestParam String dashboardMasterId) {
+        logger.info("GET /api/export/email-domains - Fetching distinct email domains: {}", conferenceId);
+        validateAccess(conferenceId);
+        List<String> domains = exportService.getDistinctEmailDomains(conferenceId, dashboardMasterId);
+        logger.info("GET /api/export/email-domains - Distinct email domains count: {}", domains.size());
+        return ResponseEntity.ok(domains);
+    }
+
     private ExportFilterRequest buildFilterRequest(String conferenceId, String dashboardMasterId,
                                                     Long fromSerialNo, Long toSerialNo,
                                                     LocalDate startDate, LocalDate endDate,
-                                                    String region, String country) {
+                                                    String region, String country, String emailDomain) {
         ExportFilterRequest request = new ExportFilterRequest();
         request.setConferenceId(conferenceId);
         request.setDashboardMasterId(dashboardMasterId);
@@ -200,6 +218,7 @@ public class ExportController {
         request.setEndDate(endDate);
         request.setRegion(region);
         request.setCountry(country);
+        request.setEmailDomain(emailDomain);
         return request;
     }
 

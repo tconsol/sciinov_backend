@@ -12,7 +12,6 @@ import com.lowagie.text.pdf.PdfWriter;
 import com.sciinov.dbms.dto.ExportFilterRequest;
 import com.sciinov.dbms.entity.AdminActivityLog;
 import com.sciinov.dbms.entity.DashboardData;
-import com.sciinov.dbms.entity.User;
 import com.sciinov.dbms.repository.AdminActivityLogRepository;
 import com.sciinov.dbms.repository.DashboardDataRepository;
 import com.sciinov.dbms.repository.UserRepository;
@@ -57,7 +56,12 @@ public class ExportService {
         List<DashboardData> dataList = dashboardDataRepository.findByConferenceIdAndDashboardMasterIdAndSerialNoBetween(
                 conferenceId, dashboardMasterId, fromSerialNo, toSerialNo, Sort.by(Sort.Direction.ASC, "serialNo"));
 
-        generateExcelFile(response, dataList, conferenceId, dashboardMasterId);
+        ExportFilterRequest fr = new ExportFilterRequest();
+        fr.setConferenceId(conferenceId);
+        fr.setDashboardMasterId(dashboardMasterId);
+        fr.setFromSerialNo(fromSerialNo);
+        fr.setToSerialNo(toSerialNo);
+        generateExcelFile(response, dataList, fr, AdminActivityLog.ActionType.DOWNLOAD_EXCEL);
     }
 
     // Original method - kept for backward compatibility
@@ -65,7 +69,12 @@ public class ExportService {
         List<DashboardData> dataList = dashboardDataRepository.findByConferenceIdAndDashboardMasterIdAndSerialNoBetween(
                 conferenceId, dashboardMasterId, fromSerialNo, toSerialNo, Sort.by(Sort.Direction.ASC, "serialNo"));
 
-        generatePdfFile(response, dataList, conferenceId, dashboardMasterId);
+        ExportFilterRequest fr = new ExportFilterRequest();
+        fr.setConferenceId(conferenceId);
+        fr.setDashboardMasterId(dashboardMasterId);
+        fr.setFromSerialNo(fromSerialNo);
+        fr.setToSerialNo(toSerialNo);
+        generatePdfFile(response, dataList, fr, AdminActivityLog.ActionType.DOWNLOAD_PDF);
     }
 
     /**
@@ -73,7 +82,7 @@ public class ExportService {
      */
     public void exportToExcelWithFilters(HttpServletResponse response, ExportFilterRequest filterRequest) throws IOException {
         List<DashboardData> dataList = getFilteredData(filterRequest);
-        generateExcelFile(response, dataList, filterRequest.getConferenceId(), filterRequest.getDashboardMasterId());
+        generateExcelFile(response, dataList, filterRequest, AdminActivityLog.ActionType.DOWNLOAD_EXCEL);
     }
 
     /**
@@ -81,7 +90,7 @@ public class ExportService {
      */
     public void exportToPdfWithFilters(HttpServletResponse response, ExportFilterRequest filterRequest) throws IOException {
         List<DashboardData> dataList = getFilteredData(filterRequest);
-        generatePdfFile(response, dataList, filterRequest.getConferenceId(), filterRequest.getDashboardMasterId());
+        generatePdfFile(response, dataList, filterRequest, AdminActivityLog.ActionType.DOWNLOAD_PDF);
     }
 
     /**
@@ -127,6 +136,12 @@ public class ExportService {
             query.addCriteria(Criteria.where("country").regex(filterRequest.getCountry(), "i"));
         }
 
+        // Email domain filter (e.g., "gmail.com" matches "user@gmail.com")
+        if (filterRequest.getEmailDomain() != null && !filterRequest.getEmailDomain().isEmpty()) {
+            String domainPattern = "@" + filterRequest.getEmailDomain().trim().toLowerCase();
+            query.addCriteria(Criteria.where("email").regex(domainPattern, "i"));
+        }
+
         // Sort by serial number
         query.with(Sort.by(Sort.Direction.ASC, "serialNo"));
 
@@ -166,10 +181,29 @@ public class ExportService {
     }
 
     /**
+     * Get list of distinct email domains (e.g., "gmail.com") for a conference/dashboard
+     */
+    public List<String> getDistinctEmailDomains(String conferenceId, String dashboardMasterId) {
+        Query query = new Query();
+        query.addCriteria(Criteria.where("conferenceId").is(conferenceId));
+        query.addCriteria(Criteria.where("dashboardMasterId").is(dashboardMasterId));
+        query.addCriteria(Criteria.where("deleted").is(false));
+        query.addCriteria(Criteria.where("email").ne(null));
+
+        List<String> emails = mongoTemplate.findDistinct(query, "email", DashboardData.class, String.class);
+        return emails.stream()
+                .filter(e -> e != null && e.contains("@"))
+                .map(e -> e.substring(e.indexOf('@') + 1).toLowerCase())
+                .distinct()
+                .sorted()
+                .collect(Collectors.toList());
+    }
+
+    /**
      * Generate Excel file from data list
      */
     private void generateExcelFile(HttpServletResponse response, List<DashboardData> dataList,
-                                    String conferenceId, String dashboardMasterId) throws IOException {
+                                    ExportFilterRequest filterRequest, AdminActivityLog.ActionType actionType) throws IOException {
         Workbook workbook = new XSSFWorkbook();
         Sheet sheet = workbook.createSheet("Dashboard Data");
 
@@ -199,7 +233,7 @@ public class ExportService {
             sheet.autoSizeColumn(i);
         }
 
-        logExportAction(conferenceId, dashboardMasterId, AdminActivityLog.ActionType.DOWNLOAD_EXCEL);
+        logDetailedAction(filterRequest, actionType, (long) dataList.size());
 
         String fileName = "data_" + LocalDate.now().toString() + ".xlsx";
         response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
@@ -212,7 +246,7 @@ public class ExportService {
      * Generate PDF file from data list
      */
     private void generatePdfFile(HttpServletResponse response, List<DashboardData> dataList,
-                                  String conferenceId, String dashboardMasterId) throws IOException {
+                                  ExportFilterRequest filterRequest, AdminActivityLog.ActionType actionType) throws IOException {
         Document document = new Document(PageSize.A4.rotate()); // Landscape for more columns
         PdfWriter.getInstance(document, response.getOutputStream());
 
@@ -242,9 +276,9 @@ public class ExportService {
         writePdfData(table, dataList);
 
         document.add(table);
-        
-        logExportAction(conferenceId, dashboardMasterId, AdminActivityLog.ActionType.DOWNLOAD_PDF);
-        
+
+        logDetailedAction(filterRequest, actionType, (long) dataList.size());
+
         document.close();
     }
 
@@ -287,23 +321,90 @@ public class ExportService {
         }
     }
     
-    private void logExportAction(String conferenceId, String dashboardMasterId, AdminActivityLog.ActionType actionType) {
+    /**
+     * Build a human-readable filter summary from the filter request.
+     */
+    private String buildFilterSummary(ExportFilterRequest fr) {
+        StringBuilder sb = new StringBuilder();
+        if (fr.getFromSerialNo() != null && fr.getToSerialNo() != null) {
+            sb.append("Serial No: ").append(fr.getFromSerialNo()).append(" to ").append(fr.getToSerialNo()).append("; ");
+        } else if (fr.getFromSerialNo() != null) {
+            sb.append("Serial No from: ").append(fr.getFromSerialNo()).append("; ");
+        } else if (fr.getToSerialNo() != null) {
+            sb.append("Serial No to: ").append(fr.getToSerialNo()).append("; ");
+        }
+        if (fr.getStartDate() != null || fr.getEndDate() != null) {
+            sb.append("Date: ").append(fr.getStartDate() != null ? fr.getStartDate() : "any")
+              .append(" to ").append(fr.getEndDate() != null ? fr.getEndDate() : "any").append("; ");
+        }
+        if (fr.getRegion() != null && !fr.getRegion().isEmpty()) {
+            sb.append("Region: ").append(fr.getRegion()).append("; ");
+        }
+        if (fr.getCountry() != null && !fr.getCountry().isEmpty()) {
+            sb.append("Country: ").append(fr.getCountry()).append("; ");
+        }
+        if (fr.getEmailDomain() != null && !fr.getEmailDomain().isEmpty()) {
+            sb.append("Email Domain: ").append(fr.getEmailDomain()).append("; ");
+        }
+        return sb.length() > 0 ? sb.toString().trim() : "No additional filters";
+    }
+
+    /**
+     * Log detailed action with serial range, total records, email domain, and filter summary.
+     */
+    private void logDetailedAction(ExportFilterRequest fr, AdminActivityLog.ActionType actionType, Long totalRecords) {
         UserDetailsImpl userDetails = (UserDetailsImpl) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        
+
         AdminActivityLog log = new AdminActivityLog();
         log.setAdminId(userDetails.getId());
-        
-        // Fetch user to get name
-        userRepository.findById(userDetails.getId()).ifPresent(user -> {
-            log.setAdminName(user.getFirstName() + " " + user.getLastName());
-        });
+        userRepository.findById(userDetails.getId()).ifPresent(user ->
+            log.setAdminName(user.getFirstName() + " " + user.getLastName())
+        );
 
-        log.setConferenceId(conferenceId);
-        log.setDashboardMasterId(dashboardMasterId);
+        log.setConferenceId(fr.getConferenceId());
+        log.setDashboardMasterId(fr.getDashboardMasterId());
         log.setActionType(actionType);
-        log.setDescription("Exported data");
+        log.setFromSerialNo(fr.getFromSerialNo());
+        log.setToSerialNo(fr.getToSerialNo());
+        log.setTotalRecords(totalRecords);
+        log.setEmailDomain(fr.getEmailDomain() != null && !fr.getEmailDomain().isEmpty() ? fr.getEmailDomain() : null);
+
+        String filterSummary = buildFilterSummary(fr);
+        log.setFilterSummary(filterSummary);
+
+        // Build description
+        String actionLabel = actionType == AdminActivityLog.ActionType.DOWNLOAD_EXCEL ? "Downloaded Excel"
+                : actionType == AdminActivityLog.ActionType.DOWNLOAD_PDF ? "Downloaded PDF"
+                : actionType == AdminActivityLog.ActionType.VIEW ? "Viewed data"
+                : actionType.name();
+
+        StringBuilder desc = new StringBuilder(actionLabel);
+        if (fr.getFromSerialNo() != null && fr.getToSerialNo() != null) {
+            desc.append(" | Serial No ").append(fr.getFromSerialNo()).append(" to ").append(fr.getToSerialNo());
+        }
+        if (totalRecords != null) {
+            desc.append(" | Total records: ").append(totalRecords);
+        }
+        if (fr.getEmailDomain() != null && !fr.getEmailDomain().isEmpty()) {
+            desc.append(" | Email Domain: ").append(fr.getEmailDomain());
+        }
+        if (fr.getRegion() != null && !fr.getRegion().isEmpty()) {
+            desc.append(" | Region: ").append(fr.getRegion());
+        }
+        if (fr.getCountry() != null && !fr.getCountry().isEmpty()) {
+            desc.append(" | Country: ").append(fr.getCountry());
+        }
+        log.setDescription(desc.toString());
+
         log.setCreatedAt(LocalDateTime.now());
-        log.setIpAddress("127.0.0.1"); // Simplified
+        log.setIpAddress("127.0.0.1");
         adminActivityLogRepository.save(log);
+    }
+
+    /**
+     * Public method to log a VIEW (data preview) action from DashboardDataController.
+     */
+    public void logViewAction(ExportFilterRequest fr, long totalRecords) {
+        logDetailedAction(fr, AdminActivityLog.ActionType.VIEW, totalRecords);
     }
 }

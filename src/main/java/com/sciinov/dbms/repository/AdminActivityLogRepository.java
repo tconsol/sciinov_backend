@@ -13,6 +13,7 @@ public interface AdminActivityLogRepository extends MongoRepository<AdminActivit
     List<AdminActivityLog> findByConferenceIdOrderByCreatedAtDesc(String conferenceId);
     List<AdminActivityLog> findByConferenceId(String conferenceId);
     List<AdminActivityLog> findByActionType(AdminActivityLog.ActionType actionType);
+    List<AdminActivityLog> findByAdminIdAndConferenceIdOrderByCreatedAtDesc(String adminId, String conferenceId);
     List<AdminActivityLog> findByAdminIdAndConferenceId(String adminId, String conferenceId);
     List<AdminActivityLog> findAllByOrderByCreatedAtDesc();
 }

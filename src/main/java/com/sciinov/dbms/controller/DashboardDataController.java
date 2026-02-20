@@ -31,7 +31,7 @@ public class DashboardDataController {
 
     @Autowired
     private ExcelService excelService;
-    
+
     @Autowired
     private DashboardDataRepository dashboardDataRepository;
 
@@ -71,12 +71,21 @@ public class DashboardDataController {
         List<DashboardData> data = dashboardDataRepository.findByConferenceIdAndDashboardMasterIdAndSerialNoBetween(
                 conferenceId, dashboardMasterId, fromSerialNo, toSerialNo, Sort.by(Sort.Direction.ASC, "serialNo"));
         logger.info("GET /api/dashboard-data - Retrieved {} records", data.size());
+
+        // Log VIEW action
+        ExportFilterRequest fr = new ExportFilterRequest();
+        fr.setConferenceId(conferenceId);
+        fr.setDashboardMasterId(dashboardMasterId);
+        fr.setFromSerialNo(fromSerialNo);
+        fr.setToSerialNo(toSerialNo);
+        exportService.logViewAction(fr, data.size());
+
         return data;
     }
 
     /**
      * Get dashboard data with advanced filtering options
-     * Supports date range, region, and country filters
+     * Supports date range, region, country, and emailDomain filters
      */
     @GetMapping("/filter")
     @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
@@ -88,7 +97,8 @@ public class DashboardDataController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(required = false) String region,
-            @RequestParam(required = false) String country) {
+            @RequestParam(required = false) String country,
+            @RequestParam(required = false) String emailDomain) {
         logger.info("GET /api/dashboard-data/filter - Filtering data for conference: {} dashboard: {}", conferenceId, dashboardMasterId);
         validateAccess(conferenceId);
 
@@ -101,9 +111,14 @@ public class DashboardDataController {
         filterRequest.setEndDate(endDate);
         filterRequest.setRegion(region);
         filterRequest.setCountry(country);
+        filterRequest.setEmailDomain(emailDomain);
 
         List<DashboardData> data = exportService.getFilteredData(filterRequest);
         logger.info("GET /api/dashboard-data/filter - Retrieved {} filtered records", data.size());
+
+        // Log VIEW action
+        exportService.logViewAction(filterRequest, data.size());
+
         return ResponseEntity.ok(data);
     }
 
@@ -129,6 +144,8 @@ public class DashboardDataController {
 
         List<DashboardData> data = exportService.getFilteredData(filterRequest);
         logger.info("GET /api/dashboard-data/by-date - Retrieved {} records", data.size());
+
+        exportService.logViewAction(filterRequest, data.size());
         return ResponseEntity.ok(data);
     }
 
@@ -152,6 +169,8 @@ public class DashboardDataController {
 
         List<DashboardData> data = exportService.getFilteredData(filterRequest);
         logger.info("GET /api/dashboard-data/by-region - Retrieved {} records", data.size());
+
+        exportService.logViewAction(filterRequest, data.size());
         return ResponseEntity.ok(data);
     }
 
@@ -175,6 +194,33 @@ public class DashboardDataController {
 
         List<DashboardData> data = exportService.getFilteredData(filterRequest);
         logger.info("GET /api/dashboard-data/by-country - Retrieved {} records", data.size());
+
+        exportService.logViewAction(filterRequest, data.size());
+        return ResponseEntity.ok(data);
+    }
+
+    /**
+     * Get data by email domain
+     * Example: Get all data related to USA
+     */
+    @GetMapping("/by-email-domain")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
+    public ResponseEntity<List<DashboardData>> getDataByEmailDomain(
+            @RequestParam String conferenceId,
+            @RequestParam String dashboardMasterId,
+            @RequestParam String emailDomain) {
+        logger.info("GET /api/dashboard-data/by-email-domain - Email domain filter: {}", emailDomain);
+        validateAccess(conferenceId);
+
+        ExportFilterRequest filterRequest = new ExportFilterRequest();
+        filterRequest.setConferenceId(conferenceId);
+        filterRequest.setDashboardMasterId(dashboardMasterId);
+        filterRequest.setEmailDomain(emailDomain);
+
+        List<DashboardData> data = exportService.getFilteredData(filterRequest);
+        logger.info("GET /api/dashboard-data/by-email-domain - Retrieved {} records", data.size());
+
+        exportService.logViewAction(filterRequest, data.size());
         return ResponseEntity.ok(data);
     }
 
@@ -191,7 +237,8 @@ public class DashboardDataController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(required = false) String region,
-            @RequestParam(required = false) String country) {
+            @RequestParam(required = false) String country,
+            @RequestParam(required = false) String emailDomain) {
         logger.info("GET /api/dashboard-data/count - Counting filtered records");
         validateAccess(conferenceId);
 
@@ -204,6 +251,7 @@ public class DashboardDataController {
         filterRequest.setEndDate(endDate);
         filterRequest.setRegion(region);
         filterRequest.setCountry(country);
+        filterRequest.setEmailDomain(emailDomain);
 
         List<DashboardData> data = exportService.getFilteredData(filterRequest);
         long count = data.size();
