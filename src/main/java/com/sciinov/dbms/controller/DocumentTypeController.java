@@ -24,7 +24,6 @@ import java.util.stream.Collectors;
 @RestController
 @RequestMapping("/api/document-types")
 @Tag(name = "Document Types", description = "SUPER_ADMIN: manage dynamic conference document types")
-@CrossOrigin(origins = "${app.cors.allowed-origins}")
 public class DocumentTypeController {
 
     private static final Logger logger = LoggerFactory.getLogger(DocumentTypeController.class);

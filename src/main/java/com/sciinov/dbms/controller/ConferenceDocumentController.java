@@ -30,7 +30,6 @@ import java.util.stream.Collectors;
 @RestController
 @RequestMapping("/api/conference-documents")
 @Tag(name = "Conference Documents", description = "APIs for managing conference documents (Program, Book, Positive Sheets)")
-@CrossOrigin(origins = "${app.cors.allowed-origins}")
 public class ConferenceDocumentController {
     private static final Logger logger = LoggerFactory.getLogger(ConferenceDocumentController.class);
 
