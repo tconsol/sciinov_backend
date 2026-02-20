@@ -34,7 +34,7 @@ public class WebSecurityConfig {
     @Autowired
     private AuthEntryPointJwt unauthorizedHandler;
 
-commit    @Value("${app.cors.allowed-origins:https://sciinovdbms.com,http://localhost:3000,http://localhost:5173}")
+    @Value("${app.cors.allowed-origins:https://sciinovdbms.com,http://localhost:3000,http://localhost:5173}")
     private String allowedOrigins;
 
     @Bean
