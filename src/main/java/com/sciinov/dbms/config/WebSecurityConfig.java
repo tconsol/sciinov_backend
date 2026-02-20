@@ -113,21 +113,8 @@ public class WebSecurityConfig {
         logger.info("CORS allowed origins: {}", origins);
         configuration.setAllowedOrigins(origins);
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"));
-        // Allow all headers that the frontend might send
-        configuration.setAllowedHeaders(Arrays.asList(
-                "Authorization",
-                "Content-Type",
-                "Accept",
-                "X-Requested-With",  // ✅ Critical: Required for CORS preflight
-                "X-User-Id",         // ✅ Custom header for user identification
-                "X-User-Name",       // ✅ Custom header for user name
-                "X-Correlation-ID",
-                "X-CSRF-Token",
-                "Origin",
-                "Cache-Control",
-                "Access-Control-Request-Method",
-                "Access-Control-Request-Headers"
-        ));
+        // Allow all request headers to prevent preflight failures for any CRUD operation
+        configuration.setAllowedHeaders(List.of("*"));
         // Expose headers that frontend might need to read
         configuration.setExposedHeaders(Arrays.asList(
                 "Authorization",
