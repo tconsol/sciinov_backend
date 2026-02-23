@@ -2,6 +2,7 @@ package com.sciinov.dbms.controller;
 
 import com.sciinov.dbms.dto.ConferenceDashboardRequest;
 import com.sciinov.dbms.dto.ConferenceDashboardResponse;
+import com.sciinov.dbms.dto.UpdateConferenceStatusRequest;
 import com.sciinov.dbms.entity.Conference;
 import com.sciinov.dbms.entity.DashboardMaster;
 import com.sciinov.dbms.entity.User;
@@ -92,6 +93,22 @@ public class ConferenceController {
         logger.info("PUT /api/conferences/{} - Updating conference: {}", id, conference.getTitle());
         Conference updated = conferenceService.updateConference(id, conference);
         logger.info("PUT /api/conferences/{} - Conference updated successfully", id);
+        return ResponseEntity.ok(updated);
+    }
+
+    /**
+     * Update only the conference status
+     * PATCH /api/conferences/{id}/status
+     * In response all conference data is returned
+     */
+    @PatchMapping("/{id}/status")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public ResponseEntity<Conference> updateConferenceStatus(
+            @PathVariable String id,
+            @RequestBody UpdateConferenceStatusRequest request) {
+        logger.info("PATCH /api/conferences/{}/status - Updating status to: {}", id, request.getStatus());
+        Conference updated = conferenceService.updateConferenceStatus(id, request.getStatus());
+        logger.info("PATCH /api/conferences/{}/status - Conference status updated successfully", id);
         return ResponseEntity.ok(updated);
     }
 

@@ -83,6 +83,25 @@ public class ConferenceService {
     }
 
     /**
+     * Update only the status of a conference
+     * Returns all conference data in response
+     */
+    public Conference updateConferenceStatus(String id, Conference.Status status) {
+        logger.info("Updating status of conference: {} to {}", id, status);
+
+        Conference conference = conferenceRepository.findByIdAndDeletedFalse(id)
+                .orElseThrow(() -> new RuntimeException("Conference not found"));
+
+        conference.setStatus(status);
+        conference.setUpdatedAt(LocalDateTime.now());
+
+        Conference updated = conferenceRepository.save(conference);
+        logger.info("Successfully updated status of conference: {} to {}", id, status);
+
+        return updated;
+    }
+
+    /**
      * Attach dashboards to a conference
      */
     public Conference attachDashboards(String conferenceId, List<String> dashboardMasterIds) {

@@ -375,7 +375,61 @@ PUT /api/conferences/{id}
 
 ---
 
-### 3.6 Delete Conference
+### 3.6 Update Conference Status Only
+```
+PATCH /api/conferences/{id}/status
+```
+🔒 `SUPER_ADMIN`
+
+**Description:** Update only the status of a conference. All conference data is returned in the response.
+
+**Body:**
+```json
+{
+  "status": "ACTIVE"
+}
+```
+**Valid Status Values:**
+- `ACTIVE`
+- `INACTIVE`
+
+**Response `200`:**
+```json
+{
+  "id": "conf001",
+  "title": "ICSE 2026",
+  "imageUrl": "https://storage.googleapis.com/sciinovfiles/conferences/icse-2026/cover.jpg",
+  "imageBlobName": "conferences/icse-2026/cover.jpg",
+  "status": "ACTIVE",
+  "dashboardMasterIds": ["dash001", "dash002"],
+  "createdAt": "2026-01-01T10:00:00",
+  "updatedAt": "2026-02-23T14:30:00",
+  "deleted": false
+}
+```
+**Response `404`:**
+```json
+{
+  "timestamp": "2026-02-23T14:30:00",
+  "status": 404,
+  "error": "Not Found",
+  "message": "Conference not found"
+}
+```
+
+**Example Request:**
+```bash
+curl -X PATCH 'http://localhost:8080/api/conferences/conf001/status' \
+  -H 'Authorization: Bearer <JWT_TOKEN>' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "status": "INACTIVE"
+  }'
+```
+
+---
+
+### 3.7 Delete Conference
 ```
 DELETE /api/conferences/{id}
 ```
@@ -385,7 +439,7 @@ DELETE /api/conferences/{id}
 
 ---
 
-### 3.7 Upload / Replace Conference Image
+### 3.8 Upload / Replace Conference Image
 ```
 POST /api/conferences/{id}/upload-image
 ```
@@ -413,7 +467,7 @@ POST /api/conferences/{id}/upload-image
 
 ---
 
-### 3.8 Get Conference's Dashboards
+### 3.9 Get Conference's Dashboards
 ```
 GET /api/conferences/{id}/dashboards
 ```
@@ -434,7 +488,7 @@ GET /api/conferences/{id}/dashboards
 
 ---
 
-### 3.9 Attach Dashboards to Conference
+### 3.10 Attach Dashboards to Conference
 ```
 POST /api/conferences/{id}/dashboards/attach
 ```
@@ -447,8 +501,7 @@ POST /api/conferences/{id}/dashboards/attach
 **Response `200`:** Same as get dashboards response.
 
 ---
-
-### 3.10 Detach Dashboards from Conference
+### 3.11 Detach Dashboards from Conference
 ```
 POST /api/conferences/{id}/dashboards/detach
 ```
@@ -462,7 +515,7 @@ POST /api/conferences/{id}/dashboards/detach
 
 ---
 
-### 3.11 Set / Replace All Dashboards
+### 3.12 Set / Replace All Dashboards
 ```
 PUT /api/conferences/{id}/dashboards
 ```
