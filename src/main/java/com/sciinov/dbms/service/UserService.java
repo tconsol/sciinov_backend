@@ -36,11 +36,19 @@ public class UserService {
         if (userRepository.findByUserIdAndDeletedFalse(user.getUserId()).isPresent()) {
             throw new RuntimeException("Error: UserId is already taken!");
         }
-        if (userRepository.findByEmailAndDeletedFalse(user.getEmail()).isPresent()) {
-            throw new RuntimeException("Error: Email is already in use!");
+        if (user.getEmail() != null && !user.getEmail().isBlank()) {
+            if (userRepository.findByEmailAndDeletedFalse(user.getEmail()).isPresent()) {
+                throw new RuntimeException("Error: Email is already in use!");
+            }
+        } else {
+            user.setEmail(null);
         }
-        if (userRepository.findByPhoneNumberAndDeletedFalse(user.getPhoneNumber()).isPresent()) {
-            throw new RuntimeException("Error: Phone number is already in use!");
+        if (user.getPhoneNumber() != null && !user.getPhoneNumber().isBlank()) {
+            if (userRepository.findByPhoneNumberAndDeletedFalse(user.getPhoneNumber()).isPresent()) {
+                throw new RuntimeException("Error: Phone number is already in use!");
+            }
+        } else {
+            user.setPhoneNumber(null);
         }
 
         user.setPassword(passwordEncoder.encode(user.getPassword()));
@@ -55,8 +63,27 @@ public class UserService {
 
         user.setFirstName(userDetails.getFirstName());
         user.setLastName(userDetails.getLastName());
-        user.setPhoneNumber(userDetails.getPhoneNumber());
-        user.setEmail(userDetails.getEmail());
+
+        // Email is optional — only update/validate if provided
+        String newEmail = (userDetails.getEmail() != null && !userDetails.getEmail().isBlank())
+                ? userDetails.getEmail() : null;
+        if (newEmail != null && !newEmail.equals(user.getEmail())) {
+            if (userRepository.findByEmailAndDeletedFalse(newEmail).isPresent()) {
+                throw new RuntimeException("Error: Email is already in use!");
+            }
+        }
+        user.setEmail(newEmail);
+
+        // Phone is optional — only update/validate if provided
+        String newPhone = (userDetails.getPhoneNumber() != null && !userDetails.getPhoneNumber().isBlank())
+                ? userDetails.getPhoneNumber() : null;
+        if (newPhone != null && !newPhone.equals(user.getPhoneNumber())) {
+            if (userRepository.findByPhoneNumberAndDeletedFalse(newPhone).isPresent()) {
+                throw new RuntimeException("Error: Phone number is already in use!");
+            }
+        }
+        user.setPhoneNumber(newPhone);
+
         user.setStatus(userDetails.isStatus());
         
         if (userDetails.getConferenceIds() != null) {

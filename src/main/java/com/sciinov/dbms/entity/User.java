@@ -16,10 +16,10 @@ public class User {
     private String firstName;
     private String lastName;
     
-    @Indexed(unique = true)
+    @Indexed(unique = true, sparse = true)
     private String phoneNumber;
     
-    @Indexed(unique = true)
+    @Indexed(unique = true, sparse = true)
     private String email;
     
     @Indexed(unique = true)
