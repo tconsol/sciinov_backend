@@ -10,7 +10,9 @@ import com.sciinov.dbms.repository.DashboardUploadStatsRepository;
 import com.sciinov.dbms.repository.UserRepository;
 import com.sciinov.dbms.security.UserDetailsImpl;
 import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.hssf.usermodel.HSSFWorkbook;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.apache.poi.ooxml.util.PackageHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -100,13 +102,17 @@ public class ExcelService {
         List<DashboardData> existingDocs = mongoTemplate.find(emailQuery, DashboardData.class);
 
         // Normalise every stored email exactly the same way we normalise incoming ones
-        Set<String> seenEmails = existingDocs.stream()
-                .map(DashboardData::getEmail)
-                .filter(e -> e != null && !e.isBlank())
-                .map(e -> e.toLowerCase(Locale.ROOT).trim())
-                .collect(Collectors.toCollection(HashSet::new));
+        // Email normalization: lowercase + trim
+        Set<String> seenEmails = new HashSet<>();
+        for (DashboardData doc : existingDocs) {
+            String email = doc.getEmail();
+            if (email != null && !email.isBlank()) {
+                String normalized = email.toLowerCase(Locale.ROOT).trim();
+                seenEmails.add(normalized);
+            }
+        }
 
-        logger.info("[Upload] Existing emails loaded: {}", seenEmails.size());
+        logger.info("[Upload] Existing emails loaded: {} (from {} documents)", seenEmails.size(), existingDocs.size());
 
         // ── STEP 2: Parse Excel ──
         logger.info("[Upload] Parsing Excel file: {}", fileName);
@@ -120,6 +126,7 @@ public class ExcelService {
 
         // ── STEP 4: Walk rows, dedupe against seenEmails HashSet ──
         List<DashboardData> toInsert = new ArrayList<>(Math.min(totalRecords, 10_000));
+        Set<String> fileEmails = new HashSet<>();  // Track emails in current file for within-file dedup
         int newRecords  = 0;
         int duplicates  = 0;
         int skippedInvalid = 0;
@@ -151,16 +158,24 @@ public class ExcelService {
                 continue;
             }
 
-            // ── DUPLICATE CHECK — O(1) HashSet lookup ──
+            // ── DUPLICATE CHECK ──
+            // First check: is it in the database already?
             if (seenEmails.contains(emailNorm)) {
                 duplicates++;
-                logger.debug("[Upload] Duplicate skipped: {}", emailNorm);
+                logger.debug("[Upload] Duplicate from DB skipped: {}", emailNorm);
                 continue;
             }
 
-            // New record — add to HashSet immediately so later rows in the same file
-            // that share this email are also caught as duplicates.
+            // Second check: is it already in this file?
+            if (fileEmails.contains(emailNorm)) {
+                duplicates++;
+                logger.debug("[Upload] Duplicate within file skipped: {}", emailNorm);
+                continue;
+            }
+
+            // New record — add to both sets
             seenEmails.add(emailNorm);
+            fileEmails.add(emailNorm);
 
             DashboardData data = new DashboardData();
             data.setConferenceId(conferenceId);
@@ -220,13 +235,21 @@ public class ExcelService {
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
-     * Parse the first sheet of an xlsx/xls file.
+     * Parse the first sheet of an Excel file (.xls, .xlsx, .xlsm).
      * Row 0 is the header — skipped.
      * Returns a list of [name, email] string pairs.
+     * Supports multiple Excel formats:
+     * - .xlsx (Office Open XML) - Modern Excel format
+     * - .xls (BIFF8) - Legacy Excel format
+     * - .xlsm (Macro-enabled XLSX)
      */
     private List<String[]> parseExcelRows(byte[] fileBytes) throws IOException {
         List<String[]> rows = new ArrayList<>();
-        try (Workbook workbook = new XSSFWorkbook(new ByteArrayInputStream(fileBytes))) {
+
+        // Create appropriate Workbook based on file format
+        Workbook workbook = createWorkbook(fileBytes);
+
+        try {
             // Use a FormulaEvaluator so FORMULA cells return their computed value
             FormulaEvaluator evaluator = workbook.getCreationHelper().createFormulaEvaluator();
             evaluator.setIgnoreMissingWorkbooks(true);
@@ -245,8 +268,34 @@ public class ExcelService {
                 String email = getCellValueSafe(row.getCell(1), evaluator);
                 rows.add(new String[]{name, email});
             }
+        } finally {
+            workbook.close();
         }
         return rows;
+    }
+
+    /**
+     * Create appropriate Workbook instance based on file format
+     * Supports: .xlsx (OOXML), .xls (BIFF8), .xlsm (Macro-enabled XLSX)
+     */
+    private Workbook createWorkbook(byte[] fileBytes) throws IOException {
+        ByteArrayInputStream bais = new ByteArrayInputStream(fileBytes);
+
+        try {
+            // Try XLSX first (most common modern format)
+            return new XSSFWorkbook(bais);
+        } catch (Exception xlsxException) {
+            // If XLSX fails, try XLS (legacy format)
+            try {
+                bais.reset();
+                return new HSSFWorkbook(bais);
+            } catch (Exception xlsException) {
+                logger.error("[Upload] Failed to parse file as XLSX or XLS format");
+                logger.error("[Upload] XLSX error: {}", xlsxException.getMessage());
+                logger.error("[Upload] XLS error: {}", xlsException.getMessage());
+                throw new IOException("Unsupported Excel file format. Please use .xls, .xlsx, or .xlsm files.", xlsxException);
+            }
+        }
     }
 
     /**

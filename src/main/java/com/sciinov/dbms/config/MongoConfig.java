@@ -18,25 +18,32 @@ public class MongoConfig {
                                    PasswordEncoder passwordEncoder,
                                    DocumentTypeService documentTypeService) {
         return args -> {
-            // ── Seed default super admin ──────────────────────────────
-            if (!userRepository.existsByRoleAndDeletedFalse(User.Role.SUPER_ADMIN)) {
-                User superAdmin = new User();
-                superAdmin.setFirstName("Super");
-                superAdmin.setLastName("Admin");
-                superAdmin.setUserId("superadmin");
-                superAdmin.setEmail("superadmin@example.com");
-                superAdmin.setPhoneNumber("0000000000");
-                superAdmin.setPassword(passwordEncoder.encode("admin123"));
-                superAdmin.setRole(User.Role.SUPER_ADMIN);
-                superAdmin.setStatus(true);
-                superAdmin.setCreatedAt(LocalDateTime.now());
-                superAdmin.setUpdatedAt(LocalDateTime.now());
-                userRepository.save(superAdmin);
-                System.out.println("✅ Default Super Admin created: superadmin / admin123");
-            }
+           try {
+                // ── Seed default super admin ──────────────────────────────
+                if (!userRepository.existsByRoleAndDeletedFalse(User.Role.SUPER_ADMIN)) {
+                    User superAdmin = new User();
+                    superAdmin.setFirstName("Super");
+                    superAdmin.setLastName("Admin");
+                    superAdmin.setUserId("superadmin");
+                    superAdmin.setEmail("superadmin@example.com");
+                    superAdmin.setPhoneNumber("0000000000");
+                    superAdmin.setPassword(passwordEncoder.encode("admin123"));
+                    superAdmin.setRole(User.Role.SUPER_ADMIN);
+                    superAdmin.setStatus(true);
+                    superAdmin.setCreatedAt(LocalDateTime.now());
+                    superAdmin.setUpdatedAt(LocalDateTime.now());
+                    userRepository.save(superAdmin);
+                    System.out.println("✅ Default Super Admin created: superadmin / admin123");
+                }
 
-            // ── Seed default document types ───────────────────────────
-            documentTypeService.seedDefaultTypes();
+                // ── Seed default document types ───────────────────────────
+                documentTypeService.seedDefaultTypes();
+            } catch (Exception e) {
+                System.err.println("⚠️  Warning: Could not initialize database on startup: " + e.getMessage());
+                System.err.println("⚠️  The application will continue, but initial data may not be seeded.");
+                System.err.println("⚠️  Please check MongoDB connection and retry initialization.");
+                // Don't throw - allow application to start even if DB init fails
+            }
         };
     }
 }

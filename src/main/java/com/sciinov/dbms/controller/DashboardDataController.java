@@ -48,6 +48,16 @@ public class DashboardDataController {
                                          @RequestParam("dashboardMasterId") String dashboardMasterId) {
         logger.info("POST /api/dashboard-data/upload - Uploading file: {} for conference: {} dashboard: {}",
                     file.getOriginalFilename(), conferenceId, dashboardMasterId);
+
+        // Validate file format
+        String fileName = file.getOriginalFilename();
+        if (fileName == null || !isSupportedExcelFormat(fileName)) {
+            logger.warn("POST /api/dashboard-data/upload - Unsupported file format: {}", fileName);
+            return ResponseEntity.badRequest().body(
+                    "Unsupported file format. Please upload .xls, .xlsx, or .xlsm files."
+            );
+        }
+
         try {
             Map<String, Object> result = excelService.processExcelFile(file, conferenceId, dashboardMasterId);
             logger.info("POST /api/dashboard-data/upload - File processed: new={}, dup={}, time={}ms",
@@ -60,6 +70,16 @@ public class DashboardDataController {
             logger.error("POST /api/dashboard-data/upload - Runtime error: {}", e.getMessage());
             return ResponseEntity.badRequest().body(e.getMessage());
         }
+    }
+
+    /**
+     * Check if file is a supported Excel format
+     */
+    private boolean isSupportedExcelFormat(String fileName) {
+        String lowerName = fileName.toLowerCase();
+        return lowerName.endsWith(".xlsx") ||    // Office Open XML
+               lowerName.endsWith(".xls") ||     // Legacy Excel
+               lowerName.endsWith(".xlsm");      // Macro-enabled XLSX
     }
 
     /**

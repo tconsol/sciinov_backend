@@ -67,7 +67,7 @@ public class ConferenceDocumentController {
     @PostMapping("/upload")
     @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
     @Operation(summary = "Upload conference document",
-        description = "Upload Program, Book, or Positive Sheets. If file already exists for this conference/year/type, it will be replaced.")
+        description = "Upload Program, Book, or Positive Sheets. Supports multiple Excel formats (.xls, .xlsx, .xlsm) and other documents. If file already exists for this conference/year/type, it will be replaced.")
     public ResponseEntity<?> uploadDocument(
             @RequestParam String conferenceId,
             @RequestParam Integer year,
@@ -571,6 +571,7 @@ public class ConferenceDocumentController {
         if (n.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
         if (n.endsWith(".doc")) return "application/msword";
         if (n.endsWith(".xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        if (n.endsWith(".xlsm")) return "application/vnd.ms-excel.sheet.macroEnabled.12";  // Macro-enabled Excel
         if (n.endsWith(".xls")) return "application/vnd.ms-excel";
         if (n.endsWith(".pptx")) return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
         if (n.endsWith(".ppt")) return "application/vnd.ms-powerpoint";

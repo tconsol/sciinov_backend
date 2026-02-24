@@ -20,6 +20,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @RestController
@@ -41,6 +42,22 @@ public class AuthController {
 
     @Autowired
     PasswordResetService passwordResetService;
+
+    /**
+     * Get JWT token expiration info (in milliseconds)
+     * GET /api/auth/token-expiration
+     */
+    @GetMapping("/token-expiration")
+    public ResponseEntity<?> getTokenExpiration() {
+        logger.info("GET /api/auth/token-expiration - Retrieving JWT expiration time");
+        int expirationMs = jwtUtils.getJwtExpirationMs();
+        return ResponseEntity.ok(Map.of(
+                "success", true,
+                "tokenExpirationMs", expirationMs,
+                "tokenExpirationMinutes", expirationMs / 60000,
+                "tokenExpirationHours", expirationMs / 3600000
+        ));
+    }
 
     @PostMapping("/signin")
     public ResponseEntity<?> authenticateUser(@Valid @RequestBody LoginRequest loginRequest) {
