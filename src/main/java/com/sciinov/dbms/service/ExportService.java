@@ -97,6 +97,22 @@ public class ExportService {
     }
 
     /**
+     * Export to Excel from a pre-fetched data list (used for domain-extension exports)
+     */
+    public void exportToExcelWithData(HttpServletResponse response, List<DashboardData> dataList,
+                                      ExportFilterRequest filterRequest) throws IOException {
+        generateExcelFile(response, dataList, filterRequest, AdminActivityLog.ActionType.DOWNLOAD_EXCEL);
+    }
+
+    /**
+     * Export to PDF from a pre-fetched data list (used for domain-extension exports)
+     */
+    public void exportToPdfWithData(HttpServletResponse response, List<DashboardData> dataList,
+                                    ExportFilterRequest filterRequest) throws IOException {
+        generatePdfFile(response, dataList, filterRequest, AdminActivityLog.ActionType.DOWNLOAD_PDF);
+    }
+
+    /**
      * Get filtered data based on multiple criteria using dynamic query building
      */
     public List<DashboardData> getFilteredData(ExportFilterRequest filterRequest) {
@@ -163,6 +179,56 @@ public class ExportService {
                 .distinct()
                 .sorted()
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * Get distinct domain EXTENSIONS only (e.g., "com", "edu", "org", "in")
+     * from all emails in the conference/dashboard.
+     * Example: @gmail.com → "com", @in.edu → "edu", @rs.edu → "edu"
+     */
+    public List<String> getDistinctDomainExtensions(String conferenceId, String dashboardMasterId) {
+        Query query = new Query();
+        query.addCriteria(Criteria.where("conferenceId").is(conferenceId));
+        query.addCriteria(Criteria.where("dashboardMasterId").is(dashboardMasterId));
+        query.addCriteria(Criteria.where("deleted").is(false));
+        query.addCriteria(Criteria.where("email").ne(null));
+
+        List<String> emails = mongoTemplate.findDistinct(query, "email", DashboardData.class, String.class);
+        return emails.stream()
+                .filter(e -> e != null && e.contains("@") && e.contains("."))
+                .map(e -> {
+                    String domain = e.substring(e.indexOf('@') + 1).toLowerCase();
+                    // Get the last part after the final dot (e.g., "gmail.com" → "com", "in.edu" → "edu")
+                    return domain.substring(domain.lastIndexOf('.') + 1);
+                })
+                .filter(ext -> !ext.isEmpty())
+                .distinct()
+                .sorted()
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Get all dashboard data where email ends with the given domain extension.
+     * Example: extension "com" matches @gmail.com, @tcon.com, @yahoo.com
+     * Example: extension "edu" matches @in.edu, @rs.edu, @university.edu
+     */
+    public List<DashboardData> getDataByDomainExtension(String conferenceId, String dashboardMasterId, String extension) {
+        // Normalize extension (remove leading dot if present)
+        String normalizedExt = extension.trim().toLowerCase();
+        if (normalizedExt.startsWith(".")) {
+            normalizedExt = normalizedExt.substring(1);
+        }
+
+        Query query = new Query();
+        query.addCriteria(Criteria.where("conferenceId").is(conferenceId));
+        query.addCriteria(Criteria.where("dashboardMasterId").is(dashboardMasterId));
+        query.addCriteria(Criteria.where("deleted").is(false));
+        // Match emails that end with .<extension> — anchored at end with $
+        query.addCriteria(Criteria.where("email").regex("\\." + normalizedExt + "$", "i"));
+        query.with(org.springframework.data.domain.Sort.by(
+                org.springframework.data.domain.Sort.Direction.ASC, "serialNo"));
+
+        return mongoTemplate.find(query, DashboardData.class);
     }
 
     /**

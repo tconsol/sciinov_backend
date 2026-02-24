@@ -149,6 +149,64 @@ public class ExportController {
         return ResponseEntity.ok(domains);
     }
 
+    /**
+     * Download Excel filtered by domain extension (e.g., .com, .edu, .org)
+     * GET /api/export/excel/by-extension?conferenceId=X&dashboardMasterId=X&extension=com
+     */
+    @GetMapping("/excel/by-extension")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
+    public void exportToExcelByExtension(
+            HttpServletResponse response,
+            @RequestParam String conferenceId,
+            @RequestParam String dashboardMasterId,
+            @RequestParam String extension) throws IOException {
+        logger.info("GET /api/export/excel/by-extension - extension: {}", extension);
+        validateAccess(conferenceId);
+
+        String normalizedExt = extension.trim().toLowerCase();
+        if (normalizedExt.startsWith(".")) normalizedExt = normalizedExt.substring(1);
+
+        List<DashboardData> data = exportService.getDataByDomainExtension(
+                conferenceId, dashboardMasterId, normalizedExt);
+
+        logger.info("GET /api/export/excel/by-extension - Exporting {} records for .{}", data.size(), normalizedExt);
+
+        ExportFilterRequest fr = new ExportFilterRequest();
+        fr.setConferenceId(conferenceId);
+        fr.setDashboardMasterId(dashboardMasterId);
+        fr.setEmailDomain("*." + normalizedExt);
+        exportService.exportToExcelWithData(response, data, fr);
+    }
+
+    /**
+     * Download PDF filtered by domain extension (e.g., .com, .edu, .org)
+     * GET /api/export/pdf/by-extension?conferenceId=X&dashboardMasterId=X&extension=edu
+     */
+    @GetMapping("/pdf/by-extension")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
+    public void exportToPdfByExtension(
+            HttpServletResponse response,
+            @RequestParam String conferenceId,
+            @RequestParam String dashboardMasterId,
+            @RequestParam String extension) throws IOException {
+        logger.info("GET /api/export/pdf/by-extension - extension: {}", extension);
+        validateAccess(conferenceId);
+
+        String normalizedExt = extension.trim().toLowerCase();
+        if (normalizedExt.startsWith(".")) normalizedExt = normalizedExt.substring(1);
+
+        List<DashboardData> data = exportService.getDataByDomainExtension(
+                conferenceId, dashboardMasterId, normalizedExt);
+
+        logger.info("GET /api/export/pdf/by-extension - Exporting {} records for .{}", data.size(), normalizedExt);
+
+        ExportFilterRequest fr = new ExportFilterRequest();
+        fr.setConferenceId(conferenceId);
+        fr.setDashboardMasterId(dashboardMasterId);
+        fr.setEmailDomain("*." + normalizedExt);
+        exportService.exportToPdfWithData(response, data, fr);
+    }
+
     private ExportFilterRequest buildFilterRequest(String conferenceId, String dashboardMasterId,
                                                     Long fromSerialNo, Long toSerialNo,
                                                     LocalDate startDate, LocalDate endDate,

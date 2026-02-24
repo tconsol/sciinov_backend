@@ -218,6 +218,90 @@ public class DashboardDataController {
     }
 
     /**
+     * Get all data by email domain extension (e.g., .com, .edu, .org)
+     *
+     * How it works:
+     *  - extension = "com"  → matches @gmail.com, @yahoo.com, @tcon.com
+     *  - extension = "edu"  → matches @in.edu, @rs.edu, @university.edu
+     *  - extension = ".org" → matches @example.org  (leading dot is auto-stripped)
+     *
+     * GET /api/dashboard-data/by-domain-extension
+     *   ?conferenceId=XXX
+     *   &dashboardMasterId=XXX
+     *   &extension=com          (or .com — both accepted)
+     *   &page=0
+     *   &size=500
+     */
+    @GetMapping("/by-domain-extension")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
+    public ResponseEntity<Map<String, Object>> getDataByDomainExtension(
+            @RequestParam String conferenceId,
+            @RequestParam String dashboardMasterId,
+            @RequestParam String extension,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "500") int size) {
+
+        logger.info("GET /api/dashboard-data/by-domain-extension - extension='{}' conference='{}'",
+                extension, conferenceId);
+        validateAccess(conferenceId);
+
+        // Normalize — strip leading dot
+        String normalizedExt = extension.trim().toLowerCase();
+        if (normalizedExt.startsWith(".")) normalizedExt = normalizedExt.substring(1);
+
+        List<DashboardData> allData = exportService.getDataByDomainExtension(
+                conferenceId, dashboardMasterId, normalizedExt);
+
+        long totalCount = allData.size();
+        int cappedSize  = Math.min(size, 1000);
+        int fromIndex   = page * cappedSize;
+        int toIndex     = Math.min(fromIndex + cappedSize, (int) totalCount);
+        List<DashboardData> pageData = fromIndex < totalCount
+                ? allData.subList(fromIndex, toIndex)
+                : List.of();
+
+        logger.info("GET /api/dashboard-data/by-domain-extension - Found {} records for .{}", totalCount, normalizedExt);
+
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("extension",    "." + normalizedExt);
+        response.put("totalRecords", totalCount);
+        response.put("currentPage",  page);
+        response.put("pageSize",     cappedSize);
+        response.put("totalPages",   (int) Math.ceil((double) totalCount / cappedSize));
+        response.put("data",         pageData);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Get the list of distinct domain extensions available in this conference/dashboard.
+     * Use this to populate the dropdown before calling by-domain-extension.
+     *
+     * Example response: ["com", "edu", "org", "in", "net"]
+     *
+     * GET /api/dashboard-data/domain-extensions
+     *   ?conferenceId=XXX
+     *   &dashboardMasterId=XXX
+     */
+    @GetMapping("/domain-extensions")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
+    public ResponseEntity<Map<String, Object>> getDistinctDomainExtensions(
+            @RequestParam String conferenceId,
+            @RequestParam String dashboardMasterId) {
+
+        logger.info("GET /api/dashboard-data/domain-extensions - conference='{}'", conferenceId);
+        validateAccess(conferenceId);
+
+        List<String> extensions = exportService.getDistinctDomainExtensions(conferenceId, dashboardMasterId);
+
+        logger.info("GET /api/dashboard-data/domain-extensions - Found {} distinct extensions", extensions.size());
+
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("total",      extensions.size());
+        response.put("extensions", extensions);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
      * Get data by email domain (e.g., emailDomain=gmail.com)
      */
     @GetMapping("/by-email-domain")
