@@ -113,11 +113,12 @@ public class ExportService {
     }
 
     /**
-     * Get filtered data based on multiple criteria using dynamic query building
+     * Get filtered data based on multiple criteria using dynamic query building.
+     * NOTE: No sort to avoid MongoDB 32MB in-memory sort limit on large collections.
      */
     public List<DashboardData> getFilteredData(ExportFilterRequest filterRequest) {
         Query query = buildFilterQuery(filterRequest);
-        query.with(Sort.by(Sort.Direction.ASC, "serialNo"));
+        // No sort — avoids exceeding MongoDB's 32MB in-memory sort limit
         return mongoTemplate.find(query, DashboardData.class);
     }
 
@@ -211,6 +212,7 @@ public class ExportService {
      * Get all dashboard data where email ends with the given domain extension.
      * Example: extension "com" matches @gmail.com, @tcon.com, @yahoo.com
      * Example: extension "edu" matches @in.edu, @rs.edu, @university.edu
+     * NOTE: No sort applied here to avoid MongoDB 32MB memory sort limit on large collections.
      */
     public List<DashboardData> getDataByDomainExtension(String conferenceId, String dashboardMasterId, String extension) {
         // Normalize extension (remove leading dot if present)
@@ -225,8 +227,7 @@ public class ExportService {
         query.addCriteria(Criteria.where("deleted").is(false));
         // Match emails that end with .<extension> — anchored at end with $
         query.addCriteria(Criteria.where("email").regex("\\." + normalizedExt + "$", "i"));
-        query.with(org.springframework.data.domain.Sort.by(
-                org.springframework.data.domain.Sort.Direction.ASC, "serialNo"));
+        // No sort — avoids exceeding MongoDB's 32MB in-memory sort limit on large datasets
 
         return mongoTemplate.find(query, DashboardData.class);
     }
