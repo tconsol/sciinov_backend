@@ -194,17 +194,45 @@ public class ExcelService {
         logger.info("[Upload] Dedup complete — new={}, duplicates={}, invalid={}",
                 newRecords, duplicates, skippedInvalid);
 
-        // ── STEP 5: Bulk-insert in batches ──
+        // ── STEP 5: Bulk-insert in batches with rollback on failure ──
         int batchCount = 0;
+        List<String> insertedIds = new ArrayList<>();  // track every inserted _id for rollback
+
         if (!toInsert.isEmpty()) {
-            for (int i = 0; i < toInsert.size(); i += BATCH_SIZE) {
-                int end = Math.min(i + BATCH_SIZE, toInsert.size());
-                mongoTemplate.insertAll(toInsert.subList(i, end));
-                batchCount++;
-                logger.info("[Upload] Inserted batch {}/{} ({} records)",
-                        batchCount,
-                        (int) Math.ceil((double) toInsert.size() / BATCH_SIZE),
-                        end - i);
+            int totalBatches = (int) Math.ceil((double) toInsert.size() / BATCH_SIZE);
+            try {
+                for (int i = 0; i < toInsert.size(); i += BATCH_SIZE) {
+                    int end = Math.min(i + BATCH_SIZE, toInsert.size());
+                    List<DashboardData> batch = toInsert.subList(i, end);
+
+                    Collection<DashboardData> inserted = mongoTemplate.insertAll(batch);
+                    inserted.forEach(doc -> {
+                        if (doc.getId() != null) insertedIds.add(doc.getId());
+                    });
+
+                    batchCount++;
+                    logger.info("[Upload] Inserted batch {}/{} ({} records)",
+                            batchCount, totalBatches, end - i);
+                }
+            } catch (Exception insertEx) {
+                // ── ROLLBACK: delete every record we successfully inserted ──
+                if (!insertedIds.isEmpty()) {
+                    logger.error("[Upload] Batch insert FAILED at batch {} — rolling back {} already-inserted records",
+                            batchCount + 1, insertedIds.size());
+                    try {
+                        Query rollbackQuery = new Query(
+                                Criteria.where("_id").in(insertedIds));
+                        long deleted = mongoTemplate.remove(rollbackQuery, DashboardData.class).getDeletedCount();
+                        logger.info("[Upload] Rollback complete — deleted {} records", deleted);
+                    } catch (Exception rollbackEx) {
+                        logger.error("[Upload] Rollback itself failed — manual cleanup may be needed. IDs: {}",
+                                insertedIds, rollbackEx);
+                    }
+                }
+                throw new RuntimeException(
+                        "Upload failed during database insert. No data has been saved. " +
+                        "Please try uploading the file again. (Cause: " + insertEx.getMessage() + ")",
+                        insertEx);
             }
         }
 
@@ -212,7 +240,7 @@ public class ExcelService {
         logger.info("[Upload] DONE in {}ms — total={}, new={}, dup={}, invalid={}, batches={}",
                 elapsed, totalRecords, newRecords, duplicates, skippedInvalid, batchCount);
 
-        // ── STEP 6: Persist stats + activity log ──
+        // ── STEP 6: Persist stats + activity log (only on full success) ──
         saveStats(admin, conferenceId, dashboardMasterId, fileName,
                 totalRecords, newRecords, duplicates);
         logUploadActivity(admin, conferenceId, dashboardMasterId, fileName, newRecords, duplicates);

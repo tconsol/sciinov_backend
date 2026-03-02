@@ -65,10 +65,28 @@ public class DashboardDataController {
             return ResponseEntity.ok(result);
         } catch (IOException e) {
             logger.error("POST /api/dashboard-data/upload - Failed to process file: {} - {}", file.getOriginalFilename(), e.getMessage());
-            return ResponseEntity.badRequest().body("Failed to process file: " + e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of(
+                    "status", "error",
+                    "message", "Failed to read Excel file: " + e.getMessage(),
+                    "action", "Please check the file and try uploading again."
+            ));
         } catch (RuntimeException e) {
-            logger.error("POST /api/dashboard-data/upload - Runtime error: {}", e.getMessage());
-            return ResponseEntity.badRequest().body(e.getMessage());
+            String msg = e.getMessage() != null ? e.getMessage() : "Unexpected error during upload.";
+            logger.error("POST /api/dashboard-data/upload - Upload failed: {}", msg);
+
+            // If this is a DB insert failure (rollback already performed), return 500
+            if (msg.contains("Upload failed during database insert")) {
+                return ResponseEntity.internalServerError().body(Map.of(
+                        "status", "upload_failed",
+                        "message", msg,
+                        "action", "No data was saved. Please re-upload the file."
+                ));
+            }
+
+            return ResponseEntity.badRequest().body(Map.of(
+                    "status", "error",
+                    "message", msg
+            ));
         }
     }
 
