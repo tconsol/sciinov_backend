@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
@@ -69,6 +70,8 @@ public class WebSecurityConfig {
                 .exceptionHandling(exception -> exception.authenticationEntryPoint(unauthorizedHandler))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        // Allow ALL OPTIONS preflight requests without authentication (required for CORS)
+                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         // Public endpoints
                         .requestMatchers("/api/auth/signin").permitAll()
                         .requestMatchers("/api/auth/forgot-password").permitAll()
@@ -103,29 +106,18 @@ public class WebSecurityConfig {
                 .map(String::trim)
                 .filter(origin -> !origin.isEmpty())
                 .toList();
-        configuration.setAllowedOrigins(origins);
+        // Use setAllowedOriginPatterns to support credentials + wildcard if needed
+        configuration.setAllowedOriginPatterns(origins);
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"));
-        // Allow all headers that the frontend might send
-        configuration.setAllowedHeaders(Arrays.asList(
-                "Authorization",
-                "Content-Type",
-                "Accept",
-                "X-Requested-With",  // ✅ Critical: Required for CORS preflight
-                "X-User-Id",         // ✅ Custom header for user identification
-                "X-User-Name",       // ✅ Custom header for user name
-                "X-Correlation-ID",
-                "X-CSRF-Token",
-                "Origin",
-                "Cache-Control",
-                "Access-Control-Request-Method",
-                "Access-Control-Request-Headers"
-        ));
+        // Allow all headers (wildcard) to avoid any header being blocked
+        configuration.setAllowedHeaders(List.of("*"));
         // Expose headers that frontend might need to read
         configuration.setExposedHeaders(Arrays.asList(
                 "Authorization",
                 "X-Correlation-ID",
                 "X-Total-Count",
-                "X-Page-Number"
+                "X-Page-Number",
+                "Content-Disposition"
         ));
         configuration.setAllowCredentials(true);
         configuration.setMaxAge(3600L);  // 1 hour cache for preflight
