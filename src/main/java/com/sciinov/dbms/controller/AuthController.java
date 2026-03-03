@@ -164,4 +164,27 @@ public class AuthController {
         logger.warn("POST /api/auth/change-password - Password change failed for: {} - {}", userDetails.getUsername(), response.getMessage());
         return ResponseEntity.badRequest().body(response);
     }
+
+    /**
+     * Logout - Clear JWT token
+     * POST /api/auth/logout
+     * Requires: Valid JWT Token
+     */
+    @PostMapping("/logout")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
+    public ResponseEntity<MessageResponse> logout() {
+        try {
+            UserDetailsImpl userDetails = (UserDetailsImpl) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+            logger.info("POST /api/auth/logout - User {} logging out", userDetails.getUsername());
+
+            // Clear authentication from security context
+            SecurityContextHolder.clearContext();
+
+            logger.info("POST /api/auth/logout - User {} logged out successfully", userDetails.getUsername());
+            return ResponseEntity.ok(new MessageResponse("Logged out successfully", true));
+        } catch (Exception e) {
+            logger.error("POST /api/auth/logout - Error during logout: {}", e.getMessage());
+            return ResponseEntity.ok(new MessageResponse("Logged out successfully", true));
+        }
+    }
 }
