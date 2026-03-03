@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.*;
 import java.io.IOException;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/export")
@@ -150,8 +151,16 @@ public class ExportController {
     }
 
     /**
-     * Download Excel filtered by domain extension (e.g., .com, .edu, .org)
+     * Download Excel filtered by domain extension (e.g., .com, .edu, .org) with SERIAL RANGE support
+     *
+     * SMART PAGINATION (max 1000 records):
+     *  - Request range 0-1000:     Downloads first 1000 matching records
+     *  - Request range 0-1000:     ⚠️ Logs warning if already downloaded
+     *  - Request range 10000-20000: Downloads first 1000 matching records in that range
+     *  - Logs suggest next range (e.g., "search from 1001 to 2000")
+     *
      * GET /api/export/excel/by-extension?conferenceId=X&dashboardMasterId=X&extension=com
+     *     &fromSerialNo=1&toSerialNo=1000 (optional)
      */
     @GetMapping("/excel/by-extension")
     @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
@@ -159,28 +168,95 @@ public class ExportController {
             HttpServletResponse response,
             @RequestParam String conferenceId,
             @RequestParam String dashboardMasterId,
-            @RequestParam String extension) throws IOException {
-        logger.info("GET /api/export/excel/by-extension - extension: {}", extension);
+            @RequestParam String extension,
+            @RequestParam(required = false) Long fromSerialNo,
+            @RequestParam(required = false) Long toSerialNo) throws IOException {
+
+        logger.info("╔══════════════════════════════════════════════════════════════════════════════");
+        logger.info("║ GET /api/export/excel/by-extension - DOWNLOAD REQUEST");
+        logger.info("╠══════════════════════════════════════════════════════════════════════════════");
+        logger.info("║ Extension: {}", extension);
+        logger.info("║ Range: {} to {}",
+                (fromSerialNo != null ? fromSerialNo : "not specified"),
+                (toSerialNo != null ? toSerialNo : "not specified"));
+        logger.info("╚══════════════════════════════════════════════════════════════════════════════");
+
         validateAccess(conferenceId);
 
         String normalizedExt = extension.trim().toLowerCase();
         if (normalizedExt.startsWith(".")) normalizedExt = normalizedExt.substring(1);
 
-        List<DashboardData> data = exportService.getDataByDomainExtension(
-                conferenceId, dashboardMasterId, normalizedExt);
+        // Get data with range support
+        Map<String, Object> result = exportService.getDataByDomainExtensionWithRange(
+                conferenceId, dashboardMasterId, normalizedExt, fromSerialNo, toSerialNo);
 
-        logger.info("GET /api/export/excel/by-extension - Exporting {} records for .{}", data.size(), normalizedExt);
+        @SuppressWarnings("unchecked")
+        List<DashboardData> data = (List<DashboardData>) result.get("data");
+        int recordsReturned = (int) result.get("recordsReturned");
+        long totalMatching = (long) result.get("totalMatchingInRange");
 
+        logger.info("╔══════════════════════════════════════════════════════════════════════════════");
+        logger.info("║ EXCEL EXPORT - TLD Filter .{}", normalizedExt);
+        logger.info("╠══════════════════════════════════════════════════════════════════════════════");
+        logger.info("║ Total Matching in Range: {}", totalMatching);
+        logger.info("║ Records Being Exported: {}", recordsReturned);
+        logger.info("║ Percentage Exported: {:.2f}%", (recordsReturned * 100.0 / totalMatching));
+        logger.info("╚══════════════════════════════════════════════════════════════════════════════");
+
+        // Log warnings and suggestions
+        if (Boolean.TRUE.equals(result.get("hasMoreRecords"))) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> nextRange = (Map<String, Object>) result.get("nextRangeSuggestion");
+            logger.warn("╔══════════════════════════════════════════════════════════════════════════════");
+            logger.warn("║ ⚠️  MORE RECORDS AVAILABLE!");
+            logger.warn("╠══════════════════════════════════════════════════════════════════════════════");
+            logger.warn("║ Exported: {} out of {} records", recordsReturned, totalMatching);
+            logger.warn("║ Remaining: {} records not exported", (totalMatching - recordsReturned));
+            logger.warn("║ Next Range: {} to {}", nextRange.get("fromSerialNo"), nextRange.get("toSerialNo"));
+            logger.warn("║ {}", nextRange.get("message"));
+            logger.warn("╚══════════════════════════════════════════════════════════════════════════════");
+        }
+
+        if (result.containsKey("downloadWarning")) {
+            logger.warn("╔══════════════════════════════════════════════════════════════════════════════");
+            logger.warn("║ ⚠️  DUPLICATE DOWNLOAD WARNING");
+            logger.warn("╠══════════════════════════════════════════════════════════════════════════════");
+            logger.warn("║ {}", result.get("downloadWarning"));
+            logger.warn("╚══════════════════════════════════════════════════════════════════════════════");
+        }
+
+        if (result.containsKey("coverageMessage")) {
+            logger.info("╔══════════════════════════════════════════════════════════════════════════════");
+            logger.info("║ 📊 RANGE COVERAGE");
+            logger.info("╠══════════════════════════════════════════════════════════════════════════════");
+            logger.info("║ {}", result.get("coverageMessage"));
+            logger.info("╚══════════════════════════════════════════════════════════════════════════════");
+        }
+
+        // Export to Excel
         ExportFilterRequest fr = new ExportFilterRequest();
         fr.setConferenceId(conferenceId);
         fr.setDashboardMasterId(dashboardMasterId);
         fr.setEmailDomain("*." + normalizedExt);
+        fr.setFromSerialNo(fromSerialNo);
+        fr.setToSerialNo(toSerialNo);
+
+        logger.info("📥 Generating Excel file with {} records...", recordsReturned);
         exportService.exportToExcelWithData(response, data, fr);
+        logger.info("✅ Excel file generated and download started");
     }
 
     /**
-     * Download PDF filtered by domain extension (e.g., .com, .edu, .org)
+     * Download PDF filtered by domain extension (e.g., .com, .edu, .org) with SERIAL RANGE support
+     *
+     * SMART PAGINATION (max 1000 records):
+     *  - Request range 0-1000:     Downloads first 1000 matching records
+     *  - Request range 0-1000:     ⚠️ Logs warning if already downloaded
+     *  - Request range 10000-20000: Downloads first 1000 matching records in that range
+     *  - Logs suggest next range (e.g., "search from 1001 to 2000")
+     *
      * GET /api/export/pdf/by-extension?conferenceId=X&dashboardMasterId=X&extension=edu
+     *     &fromSerialNo=1&toSerialNo=1000 (optional)
      */
     @GetMapping("/pdf/by-extension")
     @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
@@ -188,23 +264,82 @@ public class ExportController {
             HttpServletResponse response,
             @RequestParam String conferenceId,
             @RequestParam String dashboardMasterId,
-            @RequestParam String extension) throws IOException {
-        logger.info("GET /api/export/pdf/by-extension - extension: {}", extension);
+            @RequestParam String extension,
+            @RequestParam(required = false) Long fromSerialNo,
+            @RequestParam(required = false) Long toSerialNo) throws IOException {
+
+        logger.info("╔══════════════════════════════════════════════════════════════════════════════");
+        logger.info("║ GET /api/export/pdf/by-extension - DOWNLOAD REQUEST");
+        logger.info("╠══════════════════════════════════════════════════════════════════════════════");
+        logger.info("║ Extension: {}", extension);
+        logger.info("║ Range: {} to {}",
+                (fromSerialNo != null ? fromSerialNo : "not specified"),
+                (toSerialNo != null ? toSerialNo : "not specified"));
+        logger.info("╚══════════════════════════════════════════════════════════════════════════════");
+
         validateAccess(conferenceId);
 
         String normalizedExt = extension.trim().toLowerCase();
         if (normalizedExt.startsWith(".")) normalizedExt = normalizedExt.substring(1);
 
-        List<DashboardData> data = exportService.getDataByDomainExtension(
-                conferenceId, dashboardMasterId, normalizedExt);
+        // Get data with range support
+        Map<String, Object> result = exportService.getDataByDomainExtensionWithRange(
+                conferenceId, dashboardMasterId, normalizedExt, fromSerialNo, toSerialNo);
 
-        logger.info("GET /api/export/pdf/by-extension - Exporting {} records for .{}", data.size(), normalizedExt);
+        @SuppressWarnings("unchecked")
+        List<DashboardData> data = (List<DashboardData>) result.get("data");
+        int recordsReturned = (int) result.get("recordsReturned");
+        long totalMatching = (long) result.get("totalMatchingInRange");
 
+        logger.info("╔══════════════════════════════════════════════════════════════════════════════");
+        logger.info("║ PDF EXPORT - TLD Filter .{}", normalizedExt);
+        logger.info("╠══════════════════════════════════════════════════════════════════════════════");
+        logger.info("║ Total Matching in Range: {}", totalMatching);
+        logger.info("║ Records Being Exported: {}", recordsReturned);
+        logger.info("║ Percentage Exported: {:.2f}%", (recordsReturned * 100.0 / totalMatching));
+        logger.info("╚══════════════════════════════════════════════════════════════════════════════");
+
+        // Log warnings and suggestions
+        if (Boolean.TRUE.equals(result.get("hasMoreRecords"))) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> nextRange = (Map<String, Object>) result.get("nextRangeSuggestion");
+            logger.warn("╔══════════════════════════════════════════════════════════════════════════════");
+            logger.warn("║ ⚠️  MORE RECORDS AVAILABLE!");
+            logger.warn("╠══════════════════════════════════════════════════════════════════════════════");
+            logger.warn("║ Exported: {} out of {} records", recordsReturned, totalMatching);
+            logger.warn("║ Remaining: {} records not exported", (totalMatching - recordsReturned));
+            logger.warn("║ Next Range: {} to {}", nextRange.get("fromSerialNo"), nextRange.get("toSerialNo"));
+            logger.warn("║ {}", nextRange.get("message"));
+            logger.warn("╚══════════════════════════════════════════════════════════════════════════════");
+        }
+
+        if (result.containsKey("downloadWarning")) {
+            logger.warn("╔══════════════════════════════════════════════════════════════════════════════");
+            logger.warn("║ ⚠️  DUPLICATE DOWNLOAD WARNING");
+            logger.warn("╠══════════════════════════════════════════════════════════════════════════════");
+            logger.warn("║ {}", result.get("downloadWarning"));
+            logger.warn("╚══════════════════════════════════════════════════════════════════════════════");
+        }
+
+        if (result.containsKey("coverageMessage")) {
+            logger.info("╔══════════════════════════════════════════════════════════════════════════════");
+            logger.info("║ 📊 RANGE COVERAGE");
+            logger.info("╠══════════════════════════════════════════════════════════════════════════════");
+            logger.info("║ {}", result.get("coverageMessage"));
+            logger.info("╚══════════════════════════════════════════════════════════════════════════════");
+        }
+
+        // Export to PDF
         ExportFilterRequest fr = new ExportFilterRequest();
         fr.setConferenceId(conferenceId);
         fr.setDashboardMasterId(dashboardMasterId);
         fr.setEmailDomain("*." + normalizedExt);
+        fr.setFromSerialNo(fromSerialNo);
+        fr.setToSerialNo(toSerialNo);
+
+        logger.info("📥 Generating PDF file with {} records...", recordsReturned);
         exportService.exportToPdfWithData(response, data, fr);
+        logger.info("✅ PDF file generated and download started");
     }
 
     private ExportFilterRequest buildFilterRequest(String conferenceId, String dashboardMasterId,

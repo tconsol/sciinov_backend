@@ -18,6 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -27,6 +28,7 @@ import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class ExcelService {
@@ -39,6 +41,12 @@ public class ExcelService {
      * small enough to avoid BSON document-size limits.
      */
     private static final int BATCH_SIZE = 1000;
+
+    /**
+     * Track upload progress in real-time
+     * Key: uploadId, Value: upload progress map
+     */
+    private static final Map<String, Map<String, Object>> uploadProgress = new ConcurrentHashMap<>();
 
     @Autowired private DashboardDataRepository dashboardDataRepository;
     @Autowired private DashboardUploadStatsRepository dashboardUploadStatsRepository;
@@ -67,14 +75,88 @@ public class ExcelService {
         // Read bytes eagerly — MultipartFile is invalid after the HTTP request ends
         byte[] fileBytes = file.getBytes();
         String originalFileName = file.getOriginalFilename();
+        String uploadId = UUID.randomUUID().toString();
 
-        return processBulkUpload(fileBytes, originalFileName, conferenceId, dashboardMasterId, admin);
+        logger.info("📥 Upload started: uploadId={} fileName={} admin={}", uploadId, originalFileName, admin.getId());
+
+        // Initialize progress tracker
+        Map<String, Object> progress = new ConcurrentHashMap<>();
+        progress.put("uploadId", uploadId);
+        progress.put("fileName", originalFileName);
+        progress.put("status", "PROCESSING");
+        progress.put("startTime", LocalDateTime.now());
+        progress.put("recordsProcessed", 0);
+        progress.put("recordsInserted", 0);
+        progress.put("message", "Upload in progress...");
+        uploadProgress.put(uploadId, progress);
+
+        // Start async processing in background
+        processBulkUploadAsync(fileBytes, originalFileName, conferenceId, dashboardMasterId, admin, uploadId);
+
+        // Return immediately to user with upload ID
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("status", "PROCESSING");
+        response.put("message", "Upload started! Data will be stored immediately...");
+        response.put("uploadId", uploadId);
+        response.put("fileName", originalFileName);
+        response.put("hint", "Use uploadId to check progress. Data is being inserted to database in background.");
+        return response;
+    }
+
+    /**
+     * Get upload progress in real-time
+     */
+    public Map<String, Object> getUploadProgress(String uploadId) {
+        Map<String, Object> progress = uploadProgress.get(uploadId);
+        if (progress == null) {
+            Map<String, Object> notFound = new LinkedHashMap<>();
+            notFound.put("status", "NOT_FOUND");
+            notFound.put("message", "Upload ID not found or expired");
+            return notFound;
+        }
+        return new LinkedHashMap<>(progress);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // ASYNC PROCESSING — data inserted immediately in background
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Process upload in background without blocking user request.
+     * Data is inserted to database IMMEDIATELY as batches complete.
+     * No user waits for entire file processing.
+     */
+    @Async
+    public void processBulkUploadAsync(byte[] fileBytes, String fileName,
+                                       String conferenceId, String dashboardMasterId,
+                                       User admin, String uploadId) {
+        Map<String, Object> progress = uploadProgress.get(uploadId);
+        try {
+            logger.info("⏳ [{}] Starting async bulk upload processing...", uploadId);
+
+            Map<String, Object> result = processBulkUpload(fileBytes, fileName, conferenceId, dashboardMasterId, admin);
+
+            // Update progress to COMPLETED
+            progress.put("status", "COMPLETED");
+            progress.put("message", "Upload completed successfully!");
+            progress.put("result", result);
+            progress.put("completionTime", LocalDateTime.now());
+
+            logger.info("✅ [{}] Async upload completed: new={}, dup={}",
+                    uploadId, result.get("newRecordsAdded"), result.get("duplicateRecordsIgnored"));
+
+        } catch (Exception e) {
+            logger.error("❌ [{}] Async upload FAILED: {}", uploadId, e.getMessage(), e);
+            progress.put("status", "FAILED");
+            progress.put("message", "Upload failed: " + e.getMessage());
+            progress.put("error", e.getMessage());
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
     // CORE PROCESSING — designed for 100 000+ rows in < 1 minute
-    //
-    //  Strategy (all O(n)):
+    //  MODIFIED: Inserts data IMMEDIATELY in batches (async mode)
+    // ─────────────────────────────────────────────────────────────────────────
     //  1. Load every existing email for this conference+dashboard in ONE query
     //     → put them into a HashSet<String>  (O(1) lookup)
     //  2. Parse all Excel rows into memory  (fast POI read)
@@ -218,6 +300,7 @@ public class ExcelService {
 
         // ── STEP 5: Bulk-insert in batches with rollback on failure ──
         int batchCount = 0;
+        int totalInserted = 0;
         List<String> insertedIds = new ArrayList<>();  // track every inserted _id for rollback
 
         if (!toInsert.isEmpty()) {
@@ -227,6 +310,7 @@ public class ExcelService {
                     int end = Math.min(i + BATCH_SIZE, toInsert.size());
                     List<DashboardData> batch = toInsert.subList(i, end);
 
+                    // ...existing code...
                     Collection<DashboardData> inserted = mongoTemplate.insertAll(batch);
                     inserted.forEach(doc -> {
                         if (doc.getId() != null) insertedIds.add(doc.getId());

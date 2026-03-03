@@ -236,43 +236,95 @@ public class DashboardDataController {
     }
 
     /**
-     * Get ALL data by email domain extension (e.g., .com, .edu, .org) — NO LIMIT
+     * Get ALL data by email domain extension (e.g., .com, .edu, .org) with SERIAL RANGE support
      *
      * How it works:
      *  - extension = "com"  → matches @gmail.com, @yahoo.com, @tcon.com
      *  - extension = "edu"  → matches @in.edu, @rs.edu, @university.edu
      *  - extension = ".org" → matches @example.org  (leading dot is auto-stripped)
      *
+     * SMART PAGINATION (max 1000 records):
+     *  - Request range 0-1000:     Returns first 1000 matching records
+     *  - Request range 0-1000:     ⚠️ Warns if already downloaded
+     *  - Request range 10000-20000: Returns first 1000 matching records in that range
+     *  - Suggests next range automatically (e.g., "search from 1001 to 2000")
+     *
      * GET /api/dashboard-data/by-domain-extension
      *   ?conferenceId=XXX
      *   &dashboardMasterId=XXX
-     *   &extension=com          (or .com — both accepted)
+     *   &extension=com              (or .com — both accepted)
+     *   &fromSerialNo=1             (optional - starting serial number)
+     *   &toSerialNo=1000            (optional - ending serial number)
      */
     @GetMapping("/by-domain-extension")
     @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
     public ResponseEntity<Map<String, Object>> getDataByDomainExtension(
             @RequestParam String conferenceId,
             @RequestParam String dashboardMasterId,
-            @RequestParam String extension) {
+            @RequestParam String extension,
+            @RequestParam(required = false) Long fromSerialNo,
+            @RequestParam(required = false) Long toSerialNo) {
 
-        logger.info("GET /api/dashboard-data/by-domain-extension - extension='{}' conference='{}'",
-                extension, conferenceId);
+        logger.info("╔══════════════════════════════════════════════════════════════════════════════");
+        logger.info("║ GET /api/dashboard-data/by-domain-extension");
+        logger.info("╠══════════════════════════════════════════════════════════════════════════════");
+        logger.info("║ Extension: {}", extension);
+        logger.info("║ Conference: {}", conferenceId);
+        logger.info("║ Dashboard: {}", dashboardMasterId);
+        logger.info("║ Range: {} to {}",
+                (fromSerialNo != null ? fromSerialNo : "not specified"),
+                (toSerialNo != null ? toSerialNo : "not specified"));
+        logger.info("╚══════════════════════════════════════════════════════════════════════════════");
+
         validateAccess(conferenceId);
 
         // Normalize — strip leading dot
         String normalizedExt = extension.trim().toLowerCase();
         if (normalizedExt.startsWith(".")) normalizedExt = normalizedExt.substring(1);
 
-        // Returns ALL matching records — no limit
-        List<DashboardData> allData = exportService.getDataByDomainExtension(
-                conferenceId, dashboardMasterId, normalizedExt);
+        // Use new range-aware method
+        Map<String, Object> response = exportService.getDataByDomainExtensionWithRange(
+                conferenceId, dashboardMasterId, normalizedExt, fromSerialNo, toSerialNo);
 
-        logger.info("GET /api/dashboard-data/by-domain-extension - Found {} records for .{}", allData.size(), normalizedExt);
+        // Log comprehensive summary
+        logger.info("╔══════════════════════════════════════════════════════════════════════════════");
+        logger.info("║ RESPONSE SUMMARY - TLD Filter .{}", normalizedExt);
+        logger.info("╠══════════════════════════════════════════════════════════════════════════════");
+        logger.info("║ Requested Range: {}", response.get("requestedRange"));
+        logger.info("║ Total Matching in Range: {}", response.get("totalMatchingInRange"));
+        logger.info("║ Records Returned: {}", response.get("recordsReturned"));
+        logger.info("║ Max Per Request: {}", response.get("maxRecordsPerRequest"));
+        logger.info("║ Has More Records: {}", response.get("hasMoreRecords"));
 
-        Map<String, Object> response = new LinkedHashMap<>();
-        response.put("extension",    "." + normalizedExt);
-        response.put("totalRecords", allData.size());
-        response.put("data",         allData);
+        if (response.containsKey("rangeCoverage")) {
+            logger.info("║ Range Coverage: {}", response.get("rangeCoverage"));
+        }
+
+        logger.info("╚══════════════════════════════════════════════════════════════════════════════");
+
+        // Log warning if more records exist
+        if (Boolean.TRUE.equals(response.get("hasMoreRecords"))) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> nextRange = (Map<String, Object>) response.get("nextRangeSuggestion");
+            logger.warn("╔══════════════════════════════════════════════════════════════════════════════");
+            logger.warn("║ ⚠️  MORE RECORDS AVAILABLE!");
+            logger.warn("╠══════════════════════════════════════════════════════════════════════════════");
+            logger.warn("║ Next Range Suggestion:");
+            logger.warn("║   From Serial: {}", nextRange.get("fromSerialNo"));
+            logger.warn("║   To Serial: {}", nextRange.get("toSerialNo"));
+            logger.warn("║   {}", nextRange.get("message"));
+            logger.warn("╚══════════════════════════════════════════════════════════════════════════════");
+        }
+
+        // Log duplicate download warning if applicable
+        if (response.containsKey("downloadWarning")) {
+            logger.warn("╔══════════════════════════════════════════════════════════════════════════════");
+            logger.warn("║ ⚠️  DUPLICATE DOWNLOAD WARNING");
+            logger.warn("╠══════════════════════════════════════════════════════════════════════════════");
+            logger.warn("║ {}", response.get("downloadWarning"));
+            logger.warn("╚══════════════════════════════════════════════════════════════════════════════");
+        }
+
         return ResponseEntity.ok(response);
     }
 
@@ -368,6 +420,18 @@ public class DashboardDataController {
         response.put("conferenceId", conferenceId);
         response.put("dashboardMasterId", dashboardMasterId);
         return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Check upload progress in real-time
+     * GET /api/dashboard-data/upload/progress/{uploadId}
+     */
+    @GetMapping("/upload/progress/{uploadId}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Map<String, Object>> getUploadProgress(@PathVariable String uploadId) {
+        logger.info("GET /api/dashboard-data/upload/progress - uploadId: {}", uploadId);
+        Map<String, Object> progress = excelService.getUploadProgress(uploadId);
+        return ResponseEntity.ok(progress);
     }
 
     private void validateAccess(String conferenceId) {
