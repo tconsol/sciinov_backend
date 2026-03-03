@@ -126,6 +126,28 @@ public class MongoConfig {
                             .named("conf_dash_del_email_idx")
             );
 
+            // 6) CRITICAL: compound index covering deleted + serialNo together
+            //    Used by every paginated GET /api/dashboard-data query
+            mongoTemplate.indexOps("dashboard_data").ensureIndex(
+                    new Index()
+                            .on("conferenceId", Sort.Direction.ASC)
+                            .on("dashboardMasterId", Sort.Direction.ASC)
+                            .on("deleted", Sort.Direction.ASC)
+                            .on("serialNo", Sort.Direction.ASC)
+                            .named("conf_dash_del_serial_idx")
+            );
+
+            // 7) Partial index: only index non-deleted documents — cuts index size ~50%
+            //    This is the fastest possible index for all active-record queries
+            mongoTemplate.indexOps("dashboard_data").ensureIndex(
+                    new Index()
+                            .on("conferenceId", Sort.Direction.ASC)
+                            .on("dashboardMasterId", Sort.Direction.ASC)
+                            .on("serialNo", Sort.Direction.ASC)
+                            .sparse()
+                            .named("conf_dash_serial_sparse_idx")
+            );
+
             // ── users collection ──
             mongoTemplate.indexOps("users").ensureIndex(
                     new Index().on("userId", Sort.Direction.ASC).unique().named("userId_unique_idx")

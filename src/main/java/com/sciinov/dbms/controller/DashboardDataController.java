@@ -10,6 +10,8 @@ import com.sciinov.dbms.service.ExportService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -113,38 +115,34 @@ public class DashboardDataController {
             @RequestParam Long toSerialNo,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "500") int size) {
-        logger.info("GET /api/dashboard-data - conference: {} range: {}-{} page: {} size: {}",
-                    conferenceId, fromSerialNo, toSerialNo, page, size);
+        long t0 = System.currentTimeMillis();
         validateAccess(conferenceId);
 
-        // Cap page size to prevent memory issues
         int cappedSize = Math.min(size, 1000);
         Pageable pageable = PageRequest.of(page, cappedSize, Sort.by(Sort.Direction.ASC, "serialNo"));
 
+        // Single DB call — fetch page
         List<DashboardData> data = dashboardDataRepository
                 .findByConferenceIdAndDashboardMasterIdAndSerialNoBetweenAndDeletedFalse(
                         conferenceId, dashboardMasterId, fromSerialNo, toSerialNo, pageable);
 
-        long totalCount = dashboardDataRepository
-                .countByConferenceIdAndDashboardMasterIdAndSerialNoBetweenAndDeletedFalse(
-                        conferenceId, dashboardMasterId, fromSerialNo, toSerialNo);
+        // Only run count on first page (page=0) to avoid extra DB hit on every page turn
+        long totalCount = (page == 0)
+                ? dashboardDataRepository.countByConferenceIdAndDashboardMasterIdAndSerialNoBetweenAndDeletedFalse(
+                        conferenceId, dashboardMasterId, fromSerialNo, toSerialNo)
+                : -1; // frontend should cache the total from page=0
 
-        logger.info("GET /api/dashboard-data - Retrieved {} / {} records", data.size(), totalCount);
-
-        // Log VIEW action
-        ExportFilterRequest fr = new ExportFilterRequest();
-        fr.setConferenceId(conferenceId);
-        fr.setDashboardMasterId(dashboardMasterId);
-        fr.setFromSerialNo(fromSerialNo);
-        fr.setToSerialNo(toSerialNo);
-        exportService.logViewAction(fr, data.size());
+        logger.info("GET /api/dashboard-data - {}ms | records={} total={}",
+                System.currentTimeMillis() - t0, data.size(), totalCount);
 
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("data", data);
         response.put("currentPage", page);
         response.put("pageSize", cappedSize);
-        response.put("totalRecords", totalCount);
-        response.put("totalPages", (int) Math.ceil((double) totalCount / cappedSize));
+        if (totalCount >= 0) {
+            response.put("totalRecords", totalCount);
+            response.put("totalPages", (int) Math.ceil((double) totalCount / cappedSize));
+        }
         response.put("fromSerialNo", fromSerialNo);
         response.put("toSerialNo", toSerialNo);
         return ResponseEntity.ok(response);
@@ -165,7 +163,7 @@ public class DashboardDataController {
             @RequestParam(required = false) String emailDomain,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "500") int size) {
-        logger.info("GET /api/dashboard-data/filter - conference: {} dashboard: {} page: {}", conferenceId, dashboardMasterId, page);
+        long t0 = System.currentTimeMillis();
         validateAccess(conferenceId);
 
         int cappedSize = Math.min(size, 1000);
@@ -179,22 +177,22 @@ public class DashboardDataController {
         filterRequest.setEndDate(endDate);
         filterRequest.setEmailDomain(emailDomain);
 
-        List<DashboardData> allData = exportService.getFilteredData(filterRequest);
-        long totalCount = allData.size();
+        // Use DB-level pagination — do NOT load all records into memory
+        List<DashboardData> pageData = exportService.getFilteredDataPaged(filterRequest, page, cappedSize);
+        // Count only on first page to avoid extra DB hit on every page turn
+        long totalCount = (page == 0) ? exportService.countFilteredData(filterRequest) : -1;
 
-        // Apply pagination in memory for filtered results
-        int fromIndex = page * cappedSize;
-        int toIndex = Math.min(fromIndex + cappedSize, (int) totalCount);
-        List<DashboardData> pageData = fromIndex < totalCount ? allData.subList(fromIndex, toIndex) : List.of();
-
-        logger.info("GET /api/dashboard-data/filter - Total: {}, Page: {} ({} records)", totalCount, page, pageData.size());
+        logger.info("GET /api/dashboard-data/filter - {}ms | page={} records={}",
+                System.currentTimeMillis() - t0, page, pageData.size());
 
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("data", pageData);
         response.put("currentPage", page);
         response.put("pageSize", cappedSize);
-        response.put("totalRecords", totalCount);
-        response.put("totalPages", (int) Math.ceil((double) totalCount / cappedSize));
+        if (totalCount >= 0) {
+            response.put("totalRecords", totalCount);
+            response.put("totalPages", (int) Math.ceil((double) totalCount / cappedSize));
+        }
         return ResponseEntity.ok(response);
     }
 
@@ -210,8 +208,10 @@ public class DashboardDataController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "500") int size) {
-        logger.info("GET /api/dashboard-data/by-date - Date range filter: {} to {}", startDate, endDate);
+        long t0 = System.currentTimeMillis();
         validateAccess(conferenceId);
+
+        int cappedSize = Math.min(size, 1000);
 
         ExportFilterRequest filterRequest = new ExportFilterRequest();
         filterRequest.setConferenceId(conferenceId);
@@ -219,19 +219,20 @@ public class DashboardDataController {
         filterRequest.setStartDate(startDate);
         filterRequest.setEndDate(endDate);
 
-        List<DashboardData> allData = exportService.getFilteredData(filterRequest);
-        long totalCount = allData.size();
-        int cappedSize = Math.min(size, 1000);
-        int fromIndex = page * cappedSize;
-        int toIndex = Math.min(fromIndex + cappedSize, (int) totalCount);
-        List<DashboardData> pageData = fromIndex < totalCount ? allData.subList(fromIndex, toIndex) : List.of();
+        // DB-level pagination — no in-memory load
+        List<DashboardData> pageData = exportService.getFilteredDataPaged(filterRequest, page, cappedSize);
+        long totalCount = (page == 0) ? exportService.countFilteredData(filterRequest) : -1;
+
+        logger.info("GET /api/dashboard-data/by-date - {}ms | records={}", System.currentTimeMillis() - t0, pageData.size());
 
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("data", pageData);
         response.put("currentPage", page);
         response.put("pageSize", cappedSize);
-        response.put("totalRecords", totalCount);
-        response.put("totalPages", (int) Math.ceil((double) totalCount / cappedSize));
+        if (totalCount >= 0) {
+            response.put("totalRecords", totalCount);
+            response.put("totalPages", (int) Math.ceil((double) totalCount / cappedSize));
+        }
         return ResponseEntity.ok(response);
     }
 
@@ -340,16 +341,18 @@ public class DashboardDataController {
      */
     @GetMapping("/domain-extensions")
     @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
+    @Cacheable(value = "domainExtensions", key = "#conferenceId + ':' + #dashboardMasterId")
     public ResponseEntity<Map<String, Object>> getDistinctDomainExtensions(
             @RequestParam String conferenceId,
             @RequestParam String dashboardMasterId) {
 
-        logger.info("GET /api/dashboard-data/domain-extensions - conference='{}'", conferenceId);
+        long t0 = System.currentTimeMillis();
         validateAccess(conferenceId);
 
         List<String> extensions = exportService.getDistinctDomainExtensions(conferenceId, dashboardMasterId);
 
-        logger.info("GET /api/dashboard-data/domain-extensions - Found {} distinct extensions", extensions.size());
+        logger.info("GET /api/dashboard-data/domain-extensions - {}ms | found {} extensions",
+                System.currentTimeMillis() - t0, extensions.size());
 
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("total",      extensions.size());

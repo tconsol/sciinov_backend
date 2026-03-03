@@ -129,6 +129,18 @@ public class ExportService {
     }
 
     /**
+     * DB-level pagination — skip/limit pushed to MongoDB, never load all into memory.
+     * Replaces the old pattern of: load all → subList in Java.
+     */
+    public List<DashboardData> getFilteredDataPaged(ExportFilterRequest filterRequest, int page, int size) {
+        Query query = buildFilterQuery(filterRequest);
+        query.with(org.springframework.data.domain.Sort.by(
+                org.springframework.data.domain.Sort.Direction.ASC, "serialNo"));
+        query.skip((long) page * size).limit(size);
+        return mongoTemplate.find(query, DashboardData.class);
+    }
+
+    /**
      * Efficient count of filtered data using MongoDB count query (no data fetch).
      */
     public long countFilteredData(ExportFilterRequest filterRequest) {
