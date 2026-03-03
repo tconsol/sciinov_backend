@@ -37,10 +37,11 @@ public class ExcelService {
 
     /**
      * Number of documents to insert per MongoDB bulk-insert call.
-     * 1000 is a sweet-spot: large enough to keep round-trips low,
-     * small enough to avoid BSON document-size limits.
+     * 10000 is optimal: large enough to minimize round-trips,
+     * small enough to stay under BSON document-size limits.
+     * Previous: 1000 (slower, more DB round-trips)
      */
-    private static final int BATCH_SIZE = 1000;
+    private static final int BATCH_SIZE = 10000;
 
     /**
      * Track upload progress in real-time
