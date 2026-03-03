@@ -12,7 +12,6 @@ import com.sciinov.dbms.security.UserDetailsImpl;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.hssf.usermodel.HSSFWorkbook;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
-import org.apache.poi.ooxml.util.PackageHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -98,17 +97,18 @@ public class ExcelService {
                         .and("dashboardMasterId").is(dashboardMasterId)
                         .and("deleted").is(false));
         emailQuery.fields().include("email"); // projection — only fetch the email field
+        // Use case-insensitive collation to match the unique index
+        emailQuery.collation(org.springframework.data.mongodb.core.query.Collation.of("en")
+                .strength(org.springframework.data.mongodb.core.query.Collation.ComparisonLevel.secondary()));
 
         List<DashboardData> existingDocs = mongoTemplate.find(emailQuery, DashboardData.class);
 
         // Normalise every stored email exactly the same way we normalise incoming ones
-        // Email normalization: lowercase + trim
         Set<String> seenEmails = new HashSet<>();
         for (DashboardData doc : existingDocs) {
             String email = doc.getEmail();
             if (email != null && !email.isBlank()) {
-                String normalized = email.toLowerCase(Locale.ROOT).trim();
-                seenEmails.add(normalized);
+                seenEmails.add(normalizeEmail(email));
             }
         }
 
@@ -130,6 +130,9 @@ public class ExcelService {
         int newRecords  = 0;
         int duplicates  = 0;
         int skippedInvalid = 0;
+        int emptyEmailCount = 0;
+        int noAtSignCount = 0;
+        List<String[]> sampleInvalidRows = new ArrayList<>();  // First 5 invalid rows for diagnostics
         LocalDateTime now = LocalDateTime.now();
 
         for (String[] row : allRows) {
@@ -139,22 +142,33 @@ public class ExcelService {
             // Skip completely empty rows
             if (isBlank(rawName) && isBlank(rawEmail)) {
                 skippedInvalid++;
+                if (sampleInvalidRows.size() < 5) {
+                    sampleInvalidRows.add(new String[]{"[BLANK]", "[BLANK]"});
+                }
                 continue;
             }
 
             // Skip rows without a usable email
             if (isBlank(rawEmail)) {
                 skippedInvalid++;
+                emptyEmailCount++;
                 logger.debug("[Upload] Skipped row — empty email, name='{}'", rawName);
+                if (sampleInvalidRows.size() < 5) {
+                    sampleInvalidRows.add(new String[]{"[EMPTY_EMAIL]", rawName});
+                }
                 continue;
             }
 
-            String emailNorm = rawEmail.toLowerCase(Locale.ROOT).trim();
+            String emailNorm = normalizeEmail(rawEmail);
 
             // Basic "@" check
             if (!emailNorm.contains("@")) {
                 skippedInvalid++;
-                logger.debug("[Upload] Skipped row — invalid email format: '{}'", emailNorm);
+                noAtSignCount++;
+                logger.debug("[Upload] Skipped row — invalid email format: raw='{}', normalized='{}'", rawEmail, emailNorm);
+                if (sampleInvalidRows.size() < 5) {
+                    sampleInvalidRows.add(new String[]{rawEmail, rawName});
+                }
                 continue;
             }
 
@@ -191,8 +205,16 @@ public class ExcelService {
             newRecords++;
         }
 
-        logger.info("[Upload] Dedup complete — new={}, duplicates={}, invalid={}",
-                newRecords, duplicates, skippedInvalid);
+        logger.info("[Upload] Dedup complete — new={}, duplicates={}, invalid={} (empty_email={}, no_at_sign={})",
+                newRecords, duplicates, skippedInvalid, emptyEmailCount, noAtSignCount);
+
+        // ── Log sample invalid rows for diagnosis ──
+        if (!sampleInvalidRows.isEmpty()) {
+            logger.info("[Upload] Sample invalid rows (first 5): {}",
+                sampleInvalidRows.stream()
+                    .map(arr -> String.format("email='%s', name='%s'", arr[0], arr[1]))
+                    .collect(Collectors.joining("; ")));
+        }
 
         // ── STEP 5: Bulk-insert in batches with rollback on failure ──
         int batchCount = 0;
@@ -237,8 +259,8 @@ public class ExcelService {
         }
 
         long elapsed = System.currentTimeMillis() - startTime;
-        logger.info("[Upload] DONE in {}ms — total={}, new={}, dup={}, invalid={}, batches={}",
-                elapsed, totalRecords, newRecords, duplicates, skippedInvalid, batchCount);
+        logger.info("[Upload] DONE in {}ms — total={}, new={}, dup={}, invalid={} (empty_email={}, no_at_sign={}), batches={}",
+                elapsed, totalRecords, newRecords, duplicates, skippedInvalid, emptyEmailCount, noAtSignCount, batchCount);
 
         // ── STEP 6: Persist stats + activity log (only on full success) ──
         saveStats(admin, conferenceId, dashboardMasterId, fileName,
@@ -264,12 +286,15 @@ public class ExcelService {
 
     /**
      * Parse the first sheet of an Excel file (.xls, .xlsx, .xlsm).
-     * Row 0 is the header — skipped.
+     * Row 0 is the header — reads column names dynamically.
      * Returns a list of [name, email] string pairs.
      * Supports multiple Excel formats:
      * - .xlsx (Office Open XML) - Modern Excel format
      * - .xls (BIFF8) - Legacy Excel format
      * - .xlsm (Macro-enabled XLSX)
+     *
+     * IMPORTANT: Reads columns by header name (case-insensitive), so column order doesn't matter.
+     * Supports headers: "Name", "Email" or any variation like "email", "EMAIL", "name", etc.
      */
     private List<String[]> parseExcelRows(byte[] fileBytes) throws IOException {
         List<String[]> rows = new ArrayList<>();
@@ -283,17 +308,53 @@ public class ExcelService {
             evaluator.setIgnoreMissingWorkbooks(true);
 
             Sheet sheet = workbook.getSheetAt(0);
-            boolean firstRow = true;
 
-            for (Row row : sheet) {
-                if (firstRow) {          // skip header
-                    firstRow = false;
-                    continue;
+            // ── STEP 1: Read header row and build column index map ──
+            Row headerRow = sheet.getRow(0);
+            if (headerRow == null) {
+                throw new IOException("Excel file has no header row. Please ensure Row 1 contains column headers (Name, Email).");
+            }
+
+            Map<String, Integer> headerMap = new HashMap<>();
+            for (Cell cell : headerRow) {
+                if (cell != null) {
+                    String headerName = getCellValueSafe(cell, evaluator).trim().toLowerCase();
+                    if (!headerName.isEmpty()) {
+                        headerMap.put(headerName, cell.getColumnIndex());
+                    }
                 }
+            }
+
+            logger.info("[Upload] Detected headers: {}", headerMap.keySet());
+
+            // ── STEP 2: Find name and email columns ──
+            Integer nameColIndex = headerMap.get("name");
+            Integer emailColIndex = headerMap.get("email");
+
+            if (nameColIndex == null && emailColIndex == null) {
+                throw new IOException("Excel file must have 'Name' and 'Email' columns in the header row. " +
+                        "Found headers: " + headerMap.keySet());
+            }
+
+            if (emailColIndex == null) {
+                throw new IOException("Excel file missing required 'Email' column in header. " +
+                        "Found headers: " + headerMap.keySet());
+            }
+
+            // Name column is optional - use -1 if not found
+            int emailCol = emailColIndex;
+            int nameCol = (nameColIndex != null) ? nameColIndex : -1;
+
+            logger.info("[Upload] Reading data — Name column: {}, Email column: {}",
+                    (nameCol >= 0 ? nameCol : "NOT FOUND"), emailCol);
+
+            // ── STEP 3: Parse data rows (skip header row 0) ──
+            for (int i = 1; i <= sheet.getLastRowNum(); i++) {
+                Row row = sheet.getRow(i);
                 if (row == null) continue;
 
-                String name  = getCellValueSafe(row.getCell(0), evaluator);
-                String email = getCellValueSafe(row.getCell(1), evaluator);
+                String name = (nameCol >= 0) ? getCellValueSafe(row.getCell(nameCol), evaluator) : "";
+                String email = getCellValueSafe(row.getCell(emailCol), evaluator);
                 rows.add(new String[]{name, email});
             }
         } finally {
@@ -386,6 +447,23 @@ public class ExcelService {
 
     private static boolean isBlank(String s) {
         return s == null || s.trim().isEmpty();
+    }
+
+    /**
+     * Normalize an email address for accurate duplicate detection:
+     *  1. Trim leading/trailing whitespace from raw input
+     *  2. Strip ALL internal whitespace (spaces, tabs, non-breaking spaces, zero-width chars)
+     *  3. Convert to lowercase
+     *
+     * This handles hidden characters that Excel may embed in cells,
+     * such as \u00A0 (non-breaking space), \u200B (zero-width space), etc.
+     */
+    private static String normalizeEmail(String raw) {
+        if (raw == null) return "";
+        // First trim leading/trailing whitespace, then remove ALL internal whitespace and special chars, finally lowercase
+        return raw.trim()
+                  .replaceAll("[\\s\\u00A0\\u200B\\u200C\\u200D\\uFEFF]+", "")
+                  .toLowerCase(Locale.ROOT);
     }
 
     private void saveStats(User admin, String conferenceId, String dashboardMasterId,

@@ -223,6 +223,32 @@ public class ConferenceService {
     }
 
     /**
+     * Get overall conference records count (non-deleted)
+     */
+    public long getTotalConferenceCount() {
+        return conferenceRepository.findByDeletedFalse().size();
+    }
+
+    /**
+     * Get dashboard count connected to a particular conference
+     */
+    public long getDashboardCountForConference(String conferenceId) {
+        Conference conference = conferenceRepository.findByIdAndDeletedFalse(conferenceId)
+                .orElseThrow(() -> new RuntimeException("Conference not found"));
+
+        List<String> dashboardIds = conference.getDashboardMasterIds();
+        if (dashboardIds == null || dashboardIds.isEmpty()) {
+            return 0;
+        }
+
+        // Count only non-deleted dashboards
+        return dashboardMasterRepository.findAllById(dashboardIds)
+                .stream()
+                .filter(dm -> !dm.isDeleted())
+                .count();
+    }
+
+    /**
      * Get all dashboards for a conference
      */
     public List<DashboardMaster> getDashboardsForConference(String conferenceId) {
