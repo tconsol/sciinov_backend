@@ -50,7 +50,7 @@ public class WebSecurityConfig {
     @Autowired
     private AuthEntryPointJwt unauthorizedHandler;
 
-    @Value("${app.cors.allowed-origins:http://localhost:5173,https://sciinovdbms.com}")
+    @Value("${app.cors.allowed-origins:https://sciinovdbms.com}")
     private String allowedOrigins;
 
     private List<String> parsedOrigins;
