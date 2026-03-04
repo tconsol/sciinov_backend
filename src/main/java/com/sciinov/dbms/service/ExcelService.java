@@ -29,6 +29,7 @@ import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.scheduling.annotation.Scheduled;
 
 @Service
 public class ExcelService {
@@ -126,8 +127,13 @@ public class ExcelService {
      * Process upload in background without blocking user request.
      * Data is inserted to database IMMEDIATELY as batches complete.
      * No user waits for entire file processing.
+     *
+     * NOTE: @Async("bulkTaskExecutor") binds this to the configured bounded
+     * ThreadPoolTaskExecutor. Without the qualifier Spring would use
+     * SimpleAsyncTaskExecutor (unbounded threads) which can exhaust server
+     * resources and cause random failures that surface as CORS errors.
      */
-    @Async
+    @Async("bulkTaskExecutor")
     public void processBulkUploadAsync(byte[] fileBytes, String fileName,
                                        String conferenceId, String dashboardMasterId,
                                        User admin, String uploadId) {
@@ -151,6 +157,39 @@ public class ExcelService {
             progress.put("status", "FAILED");
             progress.put("message", "Upload failed: " + e.getMessage());
             progress.put("error", e.getMessage());
+
+            // Always write an admin activity log so the failure appears in the
+            // admin dashboard — even when data was partially saved or rolled back.
+            try {
+                logUploadActivity(admin, conferenceId, dashboardMasterId, fileName, 0, 0, "FAILED: " + e.getMessage());
+            } catch (Exception logEx) {
+                logger.error("❌ [{}] Failed to write activity log for failed upload: {}", uploadId, logEx.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Scheduled task: evict finished/failed upload progress entries older than 2 hours.
+     * Prevents the ConcurrentHashMap from growing unbounded in production.
+     * Runs every 30 minutes.
+     */
+    @Scheduled(fixedDelay = 30 * 60 * 1000)
+    public void cleanupStaleUploadProgress() {
+        LocalDateTime cutoff = LocalDateTime.now().minusHours(2);
+        int removed = 0;
+        for (Map.Entry<String, Map<String, Object>> entry : uploadProgress.entrySet()) {
+            Map<String, Object> prog = entry.getValue();
+            String status = (String) prog.get("status");
+            Object startTimeObj = prog.get("startTime");
+            if (("COMPLETED".equals(status) || "FAILED".equals(status)) && startTimeObj instanceof LocalDateTime) {
+                if (((LocalDateTime) startTimeObj).isBefore(cutoff)) {
+                    uploadProgress.remove(entry.getKey());
+                    removed++;
+                }
+            }
+        }
+        if (removed > 0) {
+            logger.info("[UploadProgress] Cleaned up {} stale entries (older than 2 hours)", removed);
         }
     }
 
@@ -523,7 +562,7 @@ public class ExcelService {
     // HELPERS
     // ─────────────────────────────────────────────────────────────────────────
 
-    private synchronized long getNextSerialNo(String conferenceId, String dashboardMasterId) {
+    private long getNextSerialNo(String conferenceId, String dashboardMasterId) {
         return dashboardDataRepository
                 .findTopByConferenceIdAndDashboardMasterIdOrderBySerialNoDesc(conferenceId, dashboardMasterId)
                 .map(d -> d.getSerialNo() + 1)
@@ -567,14 +606,23 @@ public class ExcelService {
 
     private void logUploadActivity(User admin, String conferenceId, String dashboardMasterId,
                                    String fileName, int added, int duplicates) {
+        logUploadActivity(admin, conferenceId, dashboardMasterId, fileName, added, duplicates, null);
+    }
+
+    private void logUploadActivity(User admin, String conferenceId, String dashboardMasterId,
+                                   String fileName, int added, int duplicates, String note) {
         AdminActivityLog log = new AdminActivityLog();
         log.setAdminId(admin.getId());
         log.setAdminName(admin.getFirstName() + " " + admin.getLastName());
         log.setConferenceId(conferenceId);
         log.setDashboardMasterId(dashboardMasterId);
-        log.setActionType(AdminActivityLog.ActionType.UPLOAD_EXCEL);
-        log.setDescription("Uploaded Excel: " + fileName
-                + " | Added: " + added + " | Duplicates: " + duplicates);
+        log.setActionType(note != null && note.startsWith("FAILED")
+                ? AdminActivityLog.ActionType.UPLOAD_EXCEL
+                : AdminActivityLog.ActionType.UPLOAD_EXCEL);
+        String description = "Uploaded Excel: " + fileName
+                + " | Added: " + added + " | Duplicates: " + duplicates;
+        if (note != null) description += " | " + note;
+        log.setDescription(description);
         log.setCreatedAt(LocalDateTime.now());
         log.setIpAddress("127.0.0.1");
         analyticsService.saveAndPushLog(log);

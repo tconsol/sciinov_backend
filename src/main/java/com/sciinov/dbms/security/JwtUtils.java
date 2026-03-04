@@ -22,8 +22,15 @@ public class JwtUtils {
     @Value("${app.jwt.expiration-ms}")
     private int jwtExpirationMs;
 
+    @Value("${app.jwt.refresh-expiration-days:7}")
+    private int refreshExpirationDays;
+
     public int getJwtExpirationMs() {
         return jwtExpirationMs;
+    }
+
+    public int getRefreshTokenExpirationDays() {
+        return refreshExpirationDays;
     }
 
     public String generateJwtToken(Authentication authentication) {

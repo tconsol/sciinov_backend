@@ -9,6 +9,7 @@ import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.LocalDateTime;
+import java.util.Locale;
 
 @Document(collection = "dashboard_data")
 @CompoundIndexes({
@@ -57,7 +58,20 @@ public class DashboardData {
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
     public String getEmail() { return email; }
-    public void setEmail(String email) { this.email = email; }
+    /**
+     * Setter that normalizes email: trim spaces, remove internal whitespace/special chars, and lowercase.
+     * This ensures consistent duplicate detection and case-insensitive uniqueness.
+     */
+    public void setEmail(String email) {
+        if (email == null) {
+            this.email = null;
+        } else {
+            // Trim leading/trailing whitespace, remove ALL internal whitespace and special chars, then lowercase
+            this.email = email.trim()
+                    .replaceAll("[\\s\\u00A0\\u200B\\u200C\\u200D\\uFEFF]+", "")
+                    .toLowerCase(Locale.ROOT);
+        }
+    }
     public boolean isStatus() { return status; }
     public void setStatus(boolean status) { this.status = status; }
     public LocalDateTime getCreatedAt() { return createdAt; }

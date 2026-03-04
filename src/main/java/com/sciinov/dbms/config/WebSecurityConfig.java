@@ -3,6 +3,7 @@ package com.sciinov.dbms.config;
 import com.sciinov.dbms.security.AuthEntryPointJwt;
 import com.sciinov.dbms.security.AuthTokenFilter;
 import com.sciinov.dbms.security.UserDetailsServiceImpl;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
@@ -10,6 +11,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.Ordered;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
@@ -19,6 +21,7 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter;
 import org.springframework.web.cors.CorsConfiguration;
@@ -27,7 +30,9 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import org.springframework.web.filter.CorsFilter;
 
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Configuration
 @EnableMethodSecurity
@@ -63,20 +68,43 @@ public class WebSecurityConfig {
 
     @Bean
     public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder(12); // Increased strength from default 10 to 12
+        return new BCryptPasswordEncoder(10); // 10 = good balance of security and speed (~100ms/hash)
+    }
+
+    /**
+     * Custom AccessDeniedHandler that writes JSON directly (same pattern as AuthEntryPointJwt).
+     * Using sendError() would strip CORS headers from 403 responses — causing the browser
+     * to misreport them as CORS errors instead of authorization failures.
+     */
+    @Bean
+    public AccessDeniedHandler accessDeniedHandler() {
+        ObjectMapper mapper = new ObjectMapper();
+        return (request, response, accessDeniedException) -> {
+            response.setStatus(403);
+            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("status", 403);
+            body.put("error", "Forbidden");
+            body.put("message", accessDeniedException.getMessage());
+            body.put("path", request.getServletPath());
+            mapper.writeValue(response.getOutputStream(), body);
+        };
     }
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http.cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .csrf(csrf -> csrf.disable())
-                .exceptionHandling(exception -> exception.authenticationEntryPoint(unauthorizedHandler))
+                .exceptionHandling(exception -> exception
+                        .authenticationEntryPoint(unauthorizedHandler)
+                        .accessDeniedHandler(accessDeniedHandler()))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         // Allow ALL OPTIONS preflight requests without authentication (required for CORS)
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         // Public endpoints
                         .requestMatchers("/api/auth/signin").permitAll()
+                        .requestMatchers("/api/auth/refresh-token").permitAll()
                         .requestMatchers("/api/auth/forgot-password").permitAll()
                         .requestMatchers("/api/auth/validate-reset-token").permitAll()
                         .requestMatchers("/api/auth/reset-password").permitAll()
@@ -123,7 +151,7 @@ public class WebSecurityConfig {
                 "Content-Disposition"
         ));
         configuration.setAllowCredentials(true);
-        configuration.setMaxAge(3600L);  // 1 hour cache for preflight
+        configuration.setMaxAge(86400L);  // 24-hour preflight cache — reduces OPTIONS round-trips in production
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
