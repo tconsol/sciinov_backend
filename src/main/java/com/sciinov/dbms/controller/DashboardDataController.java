@@ -29,6 +29,16 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Dashboard Data Management Controller
+ *
+ * Handles:
+ * - Excel file uploads with deduplication and normalization
+ * - Dashboard data retrieval and filtering
+ * - Data export functionality
+ *
+ * CORS: Handled globally via WebSecurityConfig (supports https://sciinovdbms.com and http://localhost:5173)
+ */
 @RestController
 @RequestMapping("/api/dashboard-data")
 public class DashboardDataController {

@@ -265,20 +265,31 @@ public class ExcelService {
                 throw new IOException("Excel file has no header row. Row 1 must contain column headers (Name, Email).");
             }
 
+            // Normalize and identify column indices
             Map<String, Integer> headerMap = new HashMap<>();
             for (Cell cell : headerRow) {
                 if (cell != null) {
-                    String h = getCellValueSafe(cell, evaluator).trim().toLowerCase();
-                    if (!h.isEmpty()) headerMap.put(h, cell.getColumnIndex());
+                    String header = getCellValueSafe(cell, evaluator).trim().toLowerCase();
+                    if (!header.isEmpty()) {
+                        // Normalize header names to support variations
+                        String normalizedHeader = normalizeHeaderName(header);
+                        headerMap.put(normalizedHeader, cell.getColumnIndex());
+                    }
                 }
             }
-            logger.info("[Upload] Headers: {}", headerMap.keySet());
+            logger.info("📋 [Upload] Excel Headers Found: {}", headerMap.keySet());
 
-            Integer emailColIndex = headerMap.get("email");
-            Integer nameColIndex  = headerMap.get("name");
+            // Find Email column (required)
+            Integer emailColIndex = findColumnByNames(headerMap, "email", "e-mail", "mail", "email_address");
             if (emailColIndex == null) {
-                throw new IOException("Excel file missing required 'Email' column. Found: " + headerMap.keySet());
+                throw new IOException("❌ Excel file missing required 'Email' column. Found columns: " + headerMap.keySet());
             }
+
+            // Find Name column (optional)
+            Integer nameColIndex = findColumnByNames(headerMap, "name", "full_name", "firstname", "first_name", "user_name", "username");
+
+            logger.info("✅ [Upload] Column Mapping - Email: {}, Name: {}", emailColIndex, nameColIndex != null ? nameColIndex : "N/A");
+
             int emailCol = emailColIndex;
             int nameCol  = (nameColIndex != null) ? nameColIndex : -1;
 
@@ -293,6 +304,29 @@ public class ExcelService {
             workbook.close();
         }
         return rows;
+    }
+
+    /**
+     * Normalize header names to support various column naming conventions
+     * e.g., "First Name", "FIRST_NAME", "firstname", "first name" → "firstname"
+     */
+    private String normalizeHeaderName(String header) {
+        return header
+                .replaceAll("[\\s_-]+", "")  // Remove spaces, underscores, hyphens
+                .replaceAll("[^a-z0-9]", "")  // Remove special characters
+                .toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * Find a column index by trying multiple possible names
+     */
+    private Integer findColumnByNames(Map<String, Integer> headerMap, String... possibleNames) {
+        for (String name : possibleNames) {
+            String normalized = normalizeHeaderName(name);
+            Integer idx = headerMap.get(normalized);
+            if (idx != null) return idx;
+        }
+        return null;
     }
 
     private Workbook createWorkbook(byte[] fileBytes) throws IOException {
