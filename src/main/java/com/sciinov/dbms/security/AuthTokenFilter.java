@@ -14,6 +14,7 @@ import org.springframework.security.web.authentication.WebAuthenticationDetailsS
 import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
+import jakarta.servlet.DispatcherType;
 import java.io.IOException;
 
 public class AuthTokenFilter extends OncePerRequestFilter {
@@ -24,6 +25,24 @@ public class AuthTokenFilter extends OncePerRequestFilter {
     private UserDetailsServiceImpl userDetailsService;
 
     private static final Logger logger = LoggerFactory.getLogger(AuthTokenFilter.class);
+
+    /**
+     * Skip this filter for ASYNC and ERROR dispatches.
+     *
+     * When an @Async method completes, Tomcat does an ASYNC dispatch back through
+     * the filter chain. On this second pass the original JWT Bearer header is gone,
+     * so the AuthorizationFilter rejects the request with "Access Denied".
+     * Because the response is already committed the error handler cannot write CORS
+     * headers, and the browser reports it as a CORS error.
+     *
+     * By skipping auth on ASYNC/ERROR dispatches we avoid this entirely — the
+     * original request was already authenticated on the first pass.
+     */
+    @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        return request.getDispatcherType() == DispatcherType.ASYNC
+            || request.getDispatcherType() == DispatcherType.ERROR;
+    }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
@@ -44,7 +63,7 @@ public class AuthTokenFilter extends OncePerRequestFilter {
                 SecurityContextHolder.getContext().setAuthentication(authentication);
             }
         } catch (Exception e) {
-            logger.error("Cannot set user authentication: {}", e);
+            logger.error("Cannot set user authentication: {}", e.getMessage());
         }
 
         filterChain.doFilter(request, response);

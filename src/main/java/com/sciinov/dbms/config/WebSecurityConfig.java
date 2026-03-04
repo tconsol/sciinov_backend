@@ -33,6 +33,7 @@ import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import org.springframework.web.filter.CorsFilter;
 
+import jakarta.servlet.DispatcherType;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -143,6 +144,11 @@ public class WebSecurityConfig {
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 
                 .authorizeHttpRequests(auth -> auth
+
+                        // Allow ASYNC and ERROR dispatches without re-authorization
+                        // These are internal Tomcat dispatches after async processing completes.
+                        // The original request was already authenticated on the first pass.
+                        .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
 
                         // Allow CORS preflight requests
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
