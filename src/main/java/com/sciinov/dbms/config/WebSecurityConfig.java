@@ -217,8 +217,8 @@ public class WebSecurityConfig {
         logger.info("   ✅ Allow Credentials: true");
         logger.info("   ✅ Preflight Cache: 24 hours");
 
-        // Set origins using array format for better compatibility
-        configuration.setAllowedOrigins(parsedOrigins.toArray(new String[0]));
+        // Set origins using direct list
+        configuration.setAllowedOrigins(parsedOrigins);
 
         configuration.setAllowedMethods(Arrays.asList(
                 "GET",
@@ -231,7 +231,7 @@ public class WebSecurityConfig {
         ));
 
         // Allow all headers including custom ones
-        configuration.setAllowedHeaders(Arrays.asList("*"));
+        configuration.setAllowedHeaders(List.of("*"));
 
         // Expose headers that frontend might need to read
         configuration.setExposedHeaders(Arrays.asList(

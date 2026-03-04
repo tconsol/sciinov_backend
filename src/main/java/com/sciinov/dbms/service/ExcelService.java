@@ -306,29 +306,6 @@ public class ExcelService {
         return rows;
     }
 
-    /**
-     * Normalize header names to support various column naming conventions
-     * e.g., "First Name", "FIRST_NAME", "firstname", "first name" → "firstname"
-     */
-    private String normalizeHeaderName(String header) {
-        return header
-                .replaceAll("[\\s_-]+", "")  // Remove spaces, underscores, hyphens
-                .replaceAll("[^a-z0-9]", "")  // Remove special characters
-                .toLowerCase(Locale.ROOT);
-    }
-
-    /**
-     * Find a column index by trying multiple possible names
-     */
-    private Integer findColumnByNames(Map<String, Integer> headerMap, String... possibleNames) {
-        for (String name : possibleNames) {
-            String normalized = normalizeHeaderName(name);
-            Integer idx = headerMap.get(normalized);
-            if (idx != null) return idx;
-        }
-        return null;
-    }
-
     private Workbook createWorkbook(byte[] fileBytes) throws IOException {
         ByteArrayInputStream bais = new ByteArrayInputStream(fileBytes);
         try {
@@ -372,6 +349,29 @@ public class ExcelService {
         return (val == Math.floor(val) && !Double.isInfinite(val))
                 ? String.valueOf((long) val)
                 : String.valueOf(val);
+    }
+
+    /**
+     * Normalize header names to support various column naming conventions
+     * e.g., "First Name", "FIRST_NAME", "firstname", "first name" → "firstname"
+     */
+    private String normalizeHeaderName(String header) {
+        return header
+                .replaceAll("[\\s_-]+", "")  // Remove spaces, underscores, hyphens
+                .replaceAll("[^a-z0-9]", "")  // Remove special characters
+                .toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * Find a column index by trying multiple possible names
+     */
+    private Integer findColumnByNames(Map<String, Integer> headerMap, String... possibleNames) {
+        for (String name : possibleNames) {
+            String normalized = normalizeHeaderName(name);
+            Integer idx = headerMap.get(normalized);
+            if (idx != null) return idx;
+        }
+        return null;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
