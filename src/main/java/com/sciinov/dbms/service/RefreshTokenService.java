@@ -1,15 +1,21 @@
 package com.sciinov.dbms.service;
 
 import com.sciinov.dbms.entity.RefreshToken;
+import com.sciinov.dbms.entity.User;
 import com.sciinov.dbms.repository.RefreshTokenRepository;
+import com.sciinov.dbms.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.Base64;
+import java.util.List;
 import java.util.Optional;
 
 @Service
@@ -19,17 +25,53 @@ public class RefreshTokenService {
     @Autowired
     private RefreshTokenRepository refreshTokenRepository;
 
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private MongoTemplate mongoTemplate;
+
     @Value("${app.jwt.refresh-expiration-days:7}")
     private int refreshTokenExpirationDays;
 
+    /**
+     * Generate a new refresh token for a user.
+     * If the user has an existing active token, revoke it.
+     *
+     * DEFENSIVE: Use MongoDB query instead of findByUserId to handle duplicate users gracefully.
+     */
     public String generateRefreshToken(String userId) {
         logger.debug("Generating refresh token for user: {}", userId);
-        Optional<RefreshToken> existingToken = refreshTokenRepository.findByUserId(userId);
-        if (existingToken.isPresent()) {
-            RefreshToken token = existingToken.get();
-            token.setRevoked(true);
-            refreshTokenRepository.save(token);
+
+        try {
+            // Verify user exists and is not deleted (graceful fallback)
+            User user = userRepository.findById(userId).orElse(null);
+            if (user == null || user.isDeleted() || !user.isStatus()) {
+                logger.warn("Cannot generate refresh token: user {} is null/deleted/inactive", userId);
+                throw new IllegalArgumentException("User not found or inactive");
+            }
+        } catch (Exception e) {
+            logger.error("Error fetching user {}: {}", userId, e.getMessage());
+            throw new IllegalArgumentException("Invalid user");
         }
+
+        // Revoke existing token (if any)
+        try {
+            List<RefreshToken> existingTokens = mongoTemplate.find(
+                    Query.query(Criteria.where("userId").is(userId).and("revoked").is(false)),
+                    RefreshToken.class
+            );
+            for (RefreshToken token : existingTokens) {
+                token.setRevoked(true);
+                refreshTokenRepository.save(token);
+                logger.debug("Revoked existing refresh token for user: {}", userId);
+            }
+        } catch (Exception e) {
+            logger.warn("Could not revoke existing tokens for user {}: {}", userId, e.getMessage());
+            // Continue anyway — generate new token
+        }
+
+        // Generate new token
         String tokenValue = generateRandomToken();
         LocalDateTime expiryDate = LocalDateTime.now().plusDays(refreshTokenExpirationDays);
         RefreshToken refreshToken = new RefreshToken(tokenValue, userId, expiryDate);

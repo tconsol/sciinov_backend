@@ -92,20 +92,32 @@ All endpoints in this controller are **public** (no JWT required) unless stated.
 ---
 
 ### POST `/api/auth/logout`
-**Description:** Revoke the current refresh token. The access token naturally expires in 24 h.
-**Access:** `ADMIN`, `SUPER_ADMIN` *(Bearer token required)*
+**Description:** Logout and revoke refresh tokens. Works with or without a valid Bearer token.
+**Access:** ✅ **Public** — No JWT required
+
+> ⚠️ **Key Behavior:** Even if your access token has expired, logout will return 200 OK gracefully.
+> This eliminates console errors when your session expires and you click logout.
 
 **Request Body** *(optional)*:
 ```json
 {
-  "refreshToken": "dGhpcyBpcyBh..."    // OPTIONAL — if omitted, all tokens for user are revoked
+  "refreshToken": "dGhpcyBpcyBh..."    // OPTIONAL — revoke specific token; if omitted, revoke all tokens for user
 }
 ```
 
-**Response 200:**
+**Response 200** *(always succeeds)*:
 ```json
 { "message": "Logged out successfully", "success": true }
 ```
+
+**Scenarios:**
+| Scenario | Behavior |
+|----------|----------|
+| **Valid Bearer token + no refresh token in body** | All refresh tokens for user are revoked; context cleared |
+| **Valid Bearer token + refresh token in body** | Only that specific refresh token is revoked |
+| **Expired Bearer token (usual case)** | Still returns 200; refresh token revoked if provided |
+| **No Bearer token at all** | Still returns 200; graceful exit |
+| **Invalid/malformed Bearer token** | Still returns 200; safe to try revoking refresh token |
 
 ---
 

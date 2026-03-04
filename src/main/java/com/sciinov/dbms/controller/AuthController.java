@@ -248,33 +248,63 @@ public class AuthController {
     /**
      * Logout - Clear JWT token and revoke refresh token
      * POST /api/auth/logout
-     * Requires: Valid JWT Token
+     * Requires: None (works with or without valid JWT token)
+     *
+     * Behavior:
+     *  - If Bearer token is valid → revoke refresh token(s) and clear session
+     *  - If Bearer token is expired/invalid → still return 200 (graceful logout)
+     *  - If refreshToken is in body → revoke only that token
+     *  - If no refreshToken → revoke all tokens for the user (if authenticated)
      */
     @PostMapping("/logout")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
     public ResponseEntity<MessageResponse> logout(@RequestBody(required = false) Map<String, String> body) {
         try {
-            UserDetailsImpl userDetails = (UserDetailsImpl) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-            logger.info("POST /api/auth/logout - User {} logging out", userDetails.getUsername());
+            // Try to get current user (may be null if token is invalid/expired)
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
 
-            // Revoke refresh token if provided
-            if (body != null && body.containsKey("refreshToken")) {
-                String refreshToken = body.get("refreshToken");
-                refreshTokenService.revokeRefreshToken(refreshToken);
-                logger.info("POST /api/auth/logout - Refresh token revoked for user: {}", userDetails.getUsername());
+            if (auth != null && auth.getPrincipal() instanceof UserDetailsImpl) {
+                // User IS authenticated — revoke tokens and clear context
+                UserDetailsImpl userDetails = (UserDetailsImpl) auth.getPrincipal();
+                logger.info("POST /api/auth/logout - Authenticated user {} logging out", userDetails.getUsername());
+
+                // Revoke refresh token if provided in body
+                if (body != null && body.containsKey("refreshToken")) {
+                    String refreshToken = body.get("refreshToken");
+                    refreshTokenService.revokeRefreshToken(refreshToken);
+                    logger.info("POST /api/auth/logout - Refresh token revoked for user: {}", userDetails.getUsername());
+                } else {
+                    // Revoke all refresh tokens for the user
+                    refreshTokenService.revokeAllTokensForUser(userDetails.getId());
+                    logger.info("POST /api/auth/logout - All refresh tokens revoked for user: {}", userDetails.getUsername());
+                }
+
+                // Clear authentication from security context
+                SecurityContextHolder.clearContext();
+                logger.info("POST /api/auth/logout - User {} logged out successfully", userDetails.getUsername());
+
             } else {
-                // Revoke all refresh tokens for the user
-                refreshTokenService.revokeAllTokensForUser(userDetails.getId());
-                logger.info("POST /api/auth/logout - All refresh tokens revoked for user: {}", userDetails.getUsername());
+                // User is NOT authenticated (token expired/invalid/missing)
+                // Still allow logout gracefully — this is normal and expected
+                logger.info("POST /api/auth/logout - Logout request received (user not authenticated or token expired)");
+
+                // If refreshToken is in body, try to revoke it anyway
+                if (body != null && body.containsKey("refreshToken")) {
+                    String refreshToken = body.get("refreshToken");
+                    try {
+                        refreshTokenService.revokeRefreshToken(refreshToken);
+                        logger.info("POST /api/auth/logout - Refresh token revoked (unauthenticated logout)");
+                    } catch (Exception e) {
+                        logger.debug("POST /api/auth/logout - Could not revoke refresh token: {}", e.getMessage());
+                    }
+                }
             }
 
-            // Clear authentication from security context
-            SecurityContextHolder.clearContext();
-
-            logger.info("POST /api/auth/logout - User {} logged out successfully", userDetails.getUsername());
+            // ALWAYS return 200 OK — logout is successful regardless of token state
             return ResponseEntity.ok(new MessageResponse("Logged out successfully", true));
+
         } catch (Exception e) {
             logger.error("POST /api/auth/logout - Error during logout: {}", e.getMessage());
+            // Even on error, return success — logout intent was clear
             return ResponseEntity.ok(new MessageResponse("Logged out successfully", true));
         }
     }

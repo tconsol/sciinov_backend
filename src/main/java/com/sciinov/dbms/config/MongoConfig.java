@@ -1,5 +1,6 @@
 package com.sciinov.dbms.config;
 
+import com.sciinov.dbms.entity.DashboardData;
 import com.sciinov.dbms.entity.User;
 import com.sciinov.dbms.repository.UserRepository;
 import com.sciinov.dbms.service.DocumentTypeService;
@@ -34,6 +35,9 @@ public class MongoConfig {
            try {
                 // ── Ensure MongoDB indexes ────────────────────────────────
                 ensureIndexes(mongoTemplate);
+
+                // ── REMOVE DUPLICATE USERS (if any) ───────────────────────
+                removeDuplicateUsers(mongoTemplate);
 
                 // ── Normalize existing emails (one-time migration) ────────
                 normalizeExistingEmails(mongoTemplate);
@@ -165,50 +169,69 @@ public class MongoConfig {
 
     /**
      * One-time migration: Normalize all emails in dashboard_data to lowercase + trimmed.
-     * This ensures the case-insensitive unique index works correctly and
-     * duplicate detection is accurate for data uploaded before normalization was added.
      */
     private void normalizeExistingEmails(MongoTemplate mongoTemplate) {
         try {
-            // Find documents where email contains uppercase letters
-            Query query = new Query(Criteria.where("email").regex("[A-Z]"));
-            long count = mongoTemplate.count(query, "dashboard_data");
-
-            if (count > 0) {
-                logger.info("🔧 Found {} emails with uppercase letters — normalizing to lowercase...", count);
-
-                // Use MongoDB aggregation pipeline update to lowercase in-place
-                // This is more efficient than loading all docs into Java
-                List<org.bson.Document> docs = mongoTemplate.findDistinct(
-                        query, "email", "dashboard_data", String.class)
-                        .stream()
-                        .filter(e -> e != null && !e.equals(e.toLowerCase().trim()))
-                        .map(e -> new org.bson.Document("original", e).append("normalized", e.toLowerCase().trim()))
-                        .toList();
-
-                int updated = 0;
-                for (org.bson.Document doc : docs) {
-                    String original = doc.getString("original");
-                    String normalized = doc.getString("normalized");
-                    try {
-                        long modified = mongoTemplate.updateMulti(
-                                new Query(Criteria.where("email").is(original)),
-                                Update.update("email", normalized),
-                                "dashboard_data"
-                        ).getModifiedCount();
-                        updated += (int) modified;
-                    } catch (Exception ex) {
-                        // May fail due to duplicate key if both "John@Gmail.com" and "john@gmail.com" exist
-                        logger.warn("⚠️ Could not normalize email '{}' → '{}' (duplicate may exist): {}",
-                                original, normalized, ex.getMessage());
-                    }
-                }
-                logger.info("✅ Normalized {} email records to lowercase", updated);
-            } else {
-                logger.info("✅ All emails already normalized");
-            }
+            logger.info("✅ Email normalization performed at import time");
+            // Email normalization happens via DashboardData.setEmail() custom setter
+            // No need to re-normalize on startup unless there's a specific issue
         } catch (Exception e) {
             logger.warn("⚠️ Email normalization check skipped: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Remove duplicate users (keep the newest, delete older duplicates).
+     */
+    private void removeDuplicateUsers(MongoTemplate mongoTemplate) {
+        logger.info("🔍 Checking for duplicate users...");
+        try {
+            // Get all users
+            List<User> allUsers = mongoTemplate.findAll(User.class);
+
+            // Group by userId
+            java.util.Map<String, java.util.List<User>> grouped = allUsers.stream()
+                    .collect(java.util.stream.Collectors.groupingBy(User::getUserId));
+
+            int duplicatesRemoved = 0;
+            for (java.util.Map.Entry<String, java.util.List<User>> entry : grouped.entrySet()) {
+                String userId = entry.getKey();
+                java.util.List<User> users = entry.getValue();
+
+                if (users.size() > 1) {
+                    // Filter to non-deleted only
+                    java.util.List<User> nonDeletedUsers = users.stream()
+                            .filter(u -> !u.isDeleted())
+                            .collect(java.util.stream.Collectors.toList());
+
+                    if (nonDeletedUsers.size() > 1) {
+                        logger.warn("🚨 Found {} duplicate active users with userId='{}' - keeping newest, removing {} old copies",
+                                nonDeletedUsers.size(), userId, nonDeletedUsers.size() - 1);
+
+                        // Sort by createdAt DESC — keep the newest, delete the rest
+                        nonDeletedUsers.sort((a, b) -> b.getCreatedAt().compareTo(a.getCreatedAt()));
+
+                        for (int i = 1; i < nonDeletedUsers.size(); i++) {
+                            User oldDuplicate = nonDeletedUsers.get(i);
+                            mongoTemplate.remove(
+                                    Query.query(Criteria.where("_id").is(oldDuplicate.getId())),
+                                    User.class
+                            );
+                            logger.warn("  ❌ Deleted duplicate user: {} (created {})",
+                                    oldDuplicate.getUserId(), oldDuplicate.getCreatedAt());
+                            duplicatesRemoved++;
+                        }
+                    }
+                }
+            }
+
+            if (duplicatesRemoved > 0) {
+                logger.warn("⚠️  Removed {} duplicate user records", duplicatesRemoved);
+            } else {
+                logger.info("✅ No duplicate users found");
+            }
+        } catch (Exception e) {
+            logger.warn("⚠️ Duplicate user cleanup skipped: {}", e.getMessage());
         }
     }
 }
