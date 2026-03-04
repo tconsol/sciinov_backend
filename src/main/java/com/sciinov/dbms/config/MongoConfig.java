@@ -40,17 +40,18 @@ public class MongoConfig {
 
                 // ── Seed default super admin ──────────────────────────────
                 if (!userRepository.existsByRoleAndDeletedFalse(User.Role.SUPER_ADMIN)) {
-                    User superAdmin = new User();
-                    superAdmin.setFirstName("Super");
-                    superAdmin.setLastName("Admin");
-                    superAdmin.setUserId("superadmin");
-                    superAdmin.setEmail("superadmin@example.com");
-                    superAdmin.setPhoneNumber("0000000000");
-                    superAdmin.setPassword(passwordEncoder.encode("admin123"));
-                    superAdmin.setRole(User.Role.SUPER_ADMIN);
-                    superAdmin.setStatus(true);
-                    superAdmin.setCreatedAt(LocalDateTime.now());
-                    superAdmin.setUpdatedAt(LocalDateTime.now());
+                    User superAdmin = User.builder()
+                            .firstName("Super")
+                            .lastName("Admin")
+                            .userId("superadmin")
+                            .email("superadmin@example.com")
+                            .phoneNumber("0000000000")
+                            .password(passwordEncoder.encode("admin123"))
+                            .role(User.Role.SUPER_ADMIN)
+                            .status(true)
+                            .createdAt(LocalDateTime.now())
+                            .updatedAt(LocalDateTime.now())
+                            .build();
                     userRepository.save(superAdmin);
                     System.out.println("✅ Default Super Admin created: superadmin / admin123");
                 }

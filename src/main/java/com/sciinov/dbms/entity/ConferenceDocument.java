@@ -1,17 +1,27 @@
 package com.sciinov.dbms.entity;
 
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.LastModifiedDate;
-import org.springframework.data.mongodb.core.mapping.Document;
-import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
+import org.springframework.data.mongodb.core.index.Indexed;
+import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.LocalDateTime;
 
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
 @Document(collection = "conference_documents")
-@CompoundIndex(name = "conference_year_type_idx", def = "{'conferenceId': 1, 'year': 1, 'documentType': 1}", unique = true)
+@CompoundIndex(name = "conference_year_type_idx",
+        def = "{'conferenceId': 1, 'year': 1, 'documentType': 1}", unique = true)
 public class ConferenceDocument {
+
     @Id
     private String id;
 
@@ -24,22 +34,27 @@ public class ConferenceDocument {
     private Integer year;
 
     /**
-     * Slug of the document type — references DocumentTypeEntity.slug.
+     * Slug of the document type (references DocumentTypeEntity.slug).
      * e.g., "program", "book", "positive_sheets"
-     * Dynamic — managed by SUPER_ADMIN via /api/document-types.
+     * Dynamically managed by SUPER_ADMIN via /api/document-types.
      */
     @Indexed
     private String documentType;
 
     /**
-     * Display name stored at upload time for fast retrieval without extra join.
+     * Display name stored at upload time to avoid extra join.
      * e.g., "Program", "Book"
      */
     private String documentTypeDisplayName;
 
     private String fileName;
-    private String blobName;    // GCS blob name (exact path in bucket — used for download/delete)
-    private String filePath;    // kept in sync with blobName
+
+    /** GCS blob name — exact path in bucket, used for download/delete */
+    private String blobName;
+
+    /** Kept in sync with blobName */
+    private String filePath;
+
     private String publicUrl;
     private Long fileSize;
     private String contentType;
@@ -52,57 +67,7 @@ public class ConferenceDocument {
 
     private String uploadedByUserId;
     private String uploadedByUserName;
+
+    @Builder.Default
     private boolean deleted = false;
-
-    // ─── Getters & Setters ───────────────────────────────────────────
-    public String getId() { return id; }
-    public void setId(String id) { this.id = id; }
-
-    public String getConferenceId() { return conferenceId; }
-    public void setConferenceId(String conferenceId) { this.conferenceId = conferenceId; }
-
-    public String getConferenceName() { return conferenceName; }
-    public void setConferenceName(String conferenceName) { this.conferenceName = conferenceName; }
-
-    public Integer getYear() { return year; }
-    public void setYear(Integer year) { this.year = year; }
-
-    public String getDocumentType() { return documentType; }
-    public void setDocumentType(String documentType) { this.documentType = documentType; }
-
-    public String getDocumentTypeDisplayName() { return documentTypeDisplayName; }
-    public void setDocumentTypeDisplayName(String documentTypeDisplayName) { this.documentTypeDisplayName = documentTypeDisplayName; }
-
-    public String getFileName() { return fileName; }
-    public void setFileName(String fileName) { this.fileName = fileName; }
-
-    public String getBlobName() { return blobName; }
-    public void setBlobName(String blobName) { this.blobName = blobName; }
-
-    public String getFilePath() { return filePath; }
-    public void setFilePath(String filePath) { this.filePath = filePath; }
-
-    public String getPublicUrl() { return publicUrl; }
-    public void setPublicUrl(String publicUrl) { this.publicUrl = publicUrl; }
-
-    public Long getFileSize() { return fileSize; }
-    public void setFileSize(Long fileSize) { this.fileSize = fileSize; }
-
-    public String getContentType() { return contentType; }
-    public void setContentType(String contentType) { this.contentType = contentType; }
-
-    public LocalDateTime getUploadedAt() { return uploadedAt; }
-    public void setUploadedAt(LocalDateTime uploadedAt) { this.uploadedAt = uploadedAt; }
-
-    public LocalDateTime getUpdatedAt() { return updatedAt; }
-    public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
-
-    public String getUploadedByUserId() { return uploadedByUserId; }
-    public void setUploadedByUserId(String uploadedByUserId) { this.uploadedByUserId = uploadedByUserId; }
-
-    public String getUploadedByUserName() { return uploadedByUserName; }
-    public void setUploadedByUserName(String uploadedByUserName) { this.uploadedByUserName = uploadedByUserName; }
-
-    public boolean isDeleted() { return deleted; }
-    public void setDeleted(boolean deleted) { this.deleted = deleted; }
 }

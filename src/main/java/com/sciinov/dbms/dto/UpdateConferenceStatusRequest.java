@@ -1,23 +1,14 @@
 package com.sciinov.dbms.dto;
 
 import com.sciinov.dbms.entity.Conference;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
 public class UpdateConferenceStatusRequest {
+    /** ACTIVE or INACTIVE */
     private Conference.Status status;
-
-    public UpdateConferenceStatusRequest() {}
-
-    public UpdateConferenceStatusRequest(Conference.Status status) {
-        this.status = status;
-    }
-
-    // Getters and Setters
-    public Conference.Status getStatus() {
-        return status;
-    }
-
-    public void setStatus(Conference.Status status) {
-        this.status = status;
-    }
 }
-

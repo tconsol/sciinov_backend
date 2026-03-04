@@ -1,5 +1,9 @@
 package com.sciinov.dbms.entity;
 
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.Indexed;
@@ -7,8 +11,13 @@ import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.LocalDateTime;
 
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
 @Document(collection = "password_reset_tokens")
 public class PasswordResetToken {
+
     @Id
     private String id;
 
@@ -19,12 +28,11 @@ public class PasswordResetToken {
 
     private LocalDateTime expiryDate;
 
+    @Builder.Default
     private boolean used = false;
 
     @CreatedDate
     private LocalDateTime createdAt;
-
-    public PasswordResetToken() {}
 
     public PasswordResetToken(String token, String userId, LocalDateTime expiryDate) {
         this.token = token;
@@ -32,22 +40,8 @@ public class PasswordResetToken {
         this.expiryDate = expiryDate;
     }
 
+    /** Returns true if this token has passed its expiry time. */
     public boolean isExpired() {
         return LocalDateTime.now().isAfter(expiryDate);
     }
-
-    // Getters and Setters
-    public String getId() { return id; }
-    public void setId(String id) { this.id = id; }
-    public String getToken() { return token; }
-    public void setToken(String token) { this.token = token; }
-    public String getUserId() { return userId; }
-    public void setUserId(String userId) { this.userId = userId; }
-    public LocalDateTime getExpiryDate() { return expiryDate; }
-    public void setExpiryDate(LocalDateTime expiryDate) { this.expiryDate = expiryDate; }
-    public boolean isUsed() { return used; }
-    public void setUsed(boolean used) { this.used = used; }
-    public LocalDateTime getCreatedAt() { return createdAt; }
-    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
 }
-

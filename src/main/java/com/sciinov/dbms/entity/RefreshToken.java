@@ -1,5 +1,9 @@
 package com.sciinov.dbms.entity;
 
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.Indexed;
@@ -7,8 +11,13 @@ import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.LocalDateTime;
 
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
 @Document(collection = "refresh_tokens")
 public class RefreshToken {
+
     @Id
     private String id;
 
@@ -23,9 +32,8 @@ public class RefreshToken {
     @CreatedDate
     private LocalDateTime createdAt;
 
+    @Builder.Default
     private boolean revoked = false;
-
-    public RefreshToken() {}
 
     public RefreshToken(String token, String userId, LocalDateTime expiryDate) {
         this.token = token;
@@ -33,57 +41,8 @@ public class RefreshToken {
         this.expiryDate = expiryDate;
     }
 
+    /** Returns true if this token has passed its expiry time. */
     public boolean isExpired() {
         return LocalDateTime.now().isAfter(expiryDate);
     }
-
-    // Getters and Setters
-    public String getId() {
-        return id;
-    }
-
-    public void setId(String id) {
-        this.id = id;
-    }
-
-    public String getToken() {
-        return token;
-    }
-
-    public void setToken(String token) {
-        this.token = token;
-    }
-
-    public String getUserId() {
-        return userId;
-    }
-
-    public void setUserId(String userId) {
-        this.userId = userId;
-    }
-
-    public LocalDateTime getExpiryDate() {
-        return expiryDate;
-    }
-
-    public void setExpiryDate(LocalDateTime expiryDate) {
-        this.expiryDate = expiryDate;
-    }
-
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
-    }
-
-    public void setCreatedAt(LocalDateTime createdAt) {
-        this.createdAt = createdAt;
-    }
-
-    public boolean isRevoked() {
-        return revoked;
-    }
-
-    public void setRevoked(boolean revoked) {
-        this.revoked = revoked;
-    }
 }
-
