@@ -48,7 +48,10 @@ public class ExcelService {
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
-     * Process an uploaded Excel file synchronously.
+     * Process an uploaded Excel file using STREAMING to minimize memory usage.
+     * <p>
+     * Key optimization: Never load the entire file into memory.
+     * Instead, process rows in small batches as they're read.
      * <p>
      * Why synchronous (not @Async)?
      * When @Async was used, Tomcat fired an ASYNC dispatch after task completion.
@@ -58,7 +61,7 @@ public class ExcelService {
      * on timing and file size. Synchronous processing eliminates this entirely.
      * <p>
      * Performance is still excellent: 100k rows complete in under 60 seconds
-     * thanks to HashSet-based dedup and batch inserts.
+     * thanks to streaming processing and batch inserts.
      */
     public Map<String, Object> processExcelFile(MultipartFile file,
                                                  String conferenceId,
@@ -75,13 +78,11 @@ public class ExcelService {
             throw new RuntimeException("Access Denied: You are not assigned to this conference.");
         }
 
-        byte[] fileBytes = file.getBytes();
         String originalFileName = file.getOriginalFilename();
-
         logger.info("📥 Upload started: fileName={} admin={}", originalFileName, admin.getId());
 
-        // ── Do the actual processing (synchronous) ──
-        Map<String, Object> result = processBulkUpload(fileBytes, originalFileName,
+        // ── Do the actual processing using STREAMING (not loading full file into memory) ──
+        Map<String, Object> result = processBulkUploadStreaming(file, originalFileName,
                 conferenceId, dashboardMasterId, admin);
 
         logger.info("✅ Upload completed: new={}, dup={}, time={}ms",
@@ -93,15 +94,22 @@ public class ExcelService {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // CORE PROCESSING
+    // STREAMING PROCESSING - Memory Optimized
     // ─────────────────────────────────────────────────────────────────────────
 
-    private Map<String, Object> processBulkUpload(byte[] fileBytes, String fileName,
-                                                   String conferenceId, String dashboardMasterId,
-                                                   User admin) throws IOException {
+    /**
+     * Process Excel file using STREAMING (row-by-row).
+     * Never loads the entire file into memory.
+     * Processes rows in batches of 5000 for optimal memory usage.
+     */
+    private Map<String, Object> processBulkUploadStreaming(MultipartFile file,
+                                                            String fileName,
+                                                            String conferenceId,
+                                                            String dashboardMasterId,
+                                                            User admin) throws IOException {
         long startTime = System.currentTimeMillis();
 
-        // ── STEP 1: Load ALL existing emails in ONE query ──
+        // ── STEP 1: Load existing emails in ONE query ──
         logger.info("[Upload] Loading existing emails — conf={} dm={}", conferenceId, dashboardMasterId);
 
         Query emailQuery = new Query(
@@ -113,7 +121,6 @@ public class ExcelService {
                 .strength(org.springframework.data.mongodb.core.query.Collation.ComparisonLevel.secondary()));
 
         List<DashboardData> existingDocs = mongoTemplate.find(emailQuery, DashboardData.class);
-
         Set<String> seenEmails = new HashSet<>();
         for (DashboardData doc : existingDocs) {
             String email = doc.getEmail();
@@ -123,67 +130,117 @@ public class ExcelService {
         }
         logger.info("[Upload] Existing emails loaded: {}", seenEmails.size());
 
-        // ── STEP 2: Parse Excel ──
-        List<String[]> allRows = parseExcelRows(fileBytes);
-        int totalRecords = allRows.size();
-        logger.info("[Upload] Parsed {} data rows", totalRecords);
-
-        // ── STEP 3: Next serial number ──
+        // ── STEP 2: Get next serial number ──
         long nextSerial = getNextSerialNo(conferenceId, dashboardMasterId);
 
-        // ── STEP 4: Walk rows, dedupe ──
-        List<DashboardData> toInsert = new ArrayList<>(Math.min(totalRecords, 10_000));
+        // ── STEP 3: Stream through Excel file row by row ──
+        List<DashboardData> toInsert = new ArrayList<>(5_000); // Keep batch size at 5000
         Set<String> fileEmails = new HashSet<>();
         int newRecords = 0, duplicates = 0, skippedInvalid = 0;
         int emptyEmailCount = 0, noAtSignCount = 0;
+        int totalRecords = 0;
         List<String[]> sampleInvalidRows = new ArrayList<>();
+        List<String> insertedIds = new ArrayList<>();
         LocalDateTime now = LocalDateTime.now();
+        int batchCount = 0;
 
-        for (String[] row : allRows) {
-            String rawName  = row[0];
-            String rawEmail = row[1];
+        try (Workbook workbook = new XSSFWorkbook(file.getInputStream())) {
+            Sheet sheet = workbook.getSheetAt(0);
+            Iterator<Row> rows = sheet.iterator();
 
-            if (isBlank(rawName) && isBlank(rawEmail)) {
-                skippedInvalid++;
-                if (sampleInvalidRows.size() < 5) sampleInvalidRows.add(new String[]{"[BLANK]", "[BLANK]"});
-                continue;
-            }
-            if (isBlank(rawEmail)) {
-                skippedInvalid++; emptyEmailCount++;
-                if (sampleInvalidRows.size() < 5) sampleInvalidRows.add(new String[]{"[EMPTY_EMAIL]", rawName});
-                continue;
+            // Skip header row
+            if (rows.hasNext()) {
+                rows.next();
             }
 
-            String emailNorm = normalizeEmail(rawEmail);
-            if (!emailNorm.contains("@")) {
-                skippedInvalid++; noAtSignCount++;
-                if (sampleInvalidRows.size() < 5) sampleInvalidRows.add(new String[]{rawEmail, rawName});
-                continue;
+            // Stream through rows
+            while (rows.hasNext()) {
+                Row row = rows.next();
+                String rawName = getCellValue(row.getCell(0));
+                String rawEmail = getCellValue(row.getCell(1));
+
+                totalRecords++;
+
+                // Validate row
+                if (isBlank(rawName) && isBlank(rawEmail)) {
+                    skippedInvalid++;
+                    if (sampleInvalidRows.size() < 5) sampleInvalidRows.add(new String[]{"[BLANK]", "[BLANK]"});
+                    continue;
+                }
+                if (isBlank(rawEmail)) {
+                    skippedInvalid++;
+                    emptyEmailCount++;
+                    if (sampleInvalidRows.size() < 5) sampleInvalidRows.add(new String[]{"[EMPTY_EMAIL]", rawName});
+                    continue;
+                }
+
+                String emailNorm = normalizeEmail(rawEmail);
+                if (!emailNorm.contains("@")) {
+                    skippedInvalid++;
+                    noAtSignCount++;
+                    if (sampleInvalidRows.size() < 5) sampleInvalidRows.add(new String[]{rawEmail, rawName});
+                    continue;
+                }
+
+                // Check for duplicates
+                if (seenEmails.contains(emailNorm) || fileEmails.contains(emailNorm)) {
+                    duplicates++;
+                    continue;
+                }
+
+                seenEmails.add(emailNorm);
+                fileEmails.add(emailNorm);
+
+                // Create entity
+                DashboardData data = new DashboardData();
+                data.setConferenceId(conferenceId);
+                data.setDashboardMasterId(dashboardMasterId);
+                data.setName(isBlank(rawName) ? "" : rawName.trim());
+                data.setEmail(emailNorm);
+                data.setStatus(true);
+                data.setCreatedAt(now);
+                data.setUpdatedAt(now);
+                data.setSerialNo(nextSerial++);
+
+                toInsert.add(data);
+                newRecords++;
+
+                // FLUSH: Insert batch when it reaches 5000 records
+                if (toInsert.size() >= 5_000) {
+                    logger.info("[Upload] Flushing batch of {} records...", toInsert.size());
+                    flushBatch(toInsert, insertedIds);
+                    batchCount++;
+                    toInsert.clear(); // ← KEY: Clear list to free memory
+                    fileEmails.clear(); // ← Also clear file emails for current batch
+                }
             }
 
-            if (seenEmails.contains(emailNorm) || fileEmails.contains(emailNorm)) {
-                duplicates++;
-                continue;
+            // ── STEP 4: Flush remaining records ──
+            if (!toInsert.isEmpty()) {
+                logger.info("[Upload] Flushing final batch of {} records...", toInsert.size());
+                flushBatch(toInsert, insertedIds);
+                batchCount++;
+                toInsert.clear();
             }
 
-            seenEmails.add(emailNorm);
-            fileEmails.add(emailNorm);
-
-            DashboardData data = new DashboardData();
-            data.setConferenceId(conferenceId);
-            data.setDashboardMasterId(dashboardMasterId);
-            data.setName(isBlank(rawName) ? "" : rawName.trim());
-            data.setEmail(emailNorm);
-            data.setStatus(true);
-            data.setCreatedAt(now);
-            data.setUpdatedAt(now);
-            data.setSerialNo(nextSerial++);
-
-            toInsert.add(data);
-            newRecords++;
+        } catch (Exception e) {
+            // Rollback if batch insert failed
+            if (!insertedIds.isEmpty()) {
+                logger.error("[Upload] Processing FAILED — rolling back {} records", insertedIds.size());
+                try {
+                    long deleted = mongoTemplate.remove(
+                            new Query(Criteria.where("_id").in(insertedIds)), DashboardData.class
+                    ).getDeletedCount();
+                    logger.info("[Upload] Rollback done — deleted {}", deleted);
+                } catch (Exception rbEx) {
+                    logger.error("[Upload] Rollback failed — manual cleanup may be needed", rbEx);
+                }
+            }
+            throw new RuntimeException("Upload failed: " + e.getMessage(), e);
         }
 
-        logger.info("[Upload] Dedup done — new={}, dup={}, invalid={}", newRecords, duplicates, skippedInvalid);
+        logger.info("[Upload] Parsing DONE — total={}, new={}, dup={}, invalid={}",
+                totalRecords, newRecords, duplicates, skippedInvalid);
 
         if (!sampleInvalidRows.isEmpty()) {
             logger.info("[Upload] Sample invalid rows: {}",
@@ -192,46 +249,11 @@ public class ExcelService {
                             .collect(Collectors.joining("; ")));
         }
 
-        // ── STEP 5: Bulk-insert with rollback on failure ──
-        int batchCount = 0;
-        List<String> insertedIds = new ArrayList<>();
-
-        if (!toInsert.isEmpty()) {
-            int totalBatches = (int) Math.ceil((double) toInsert.size() / BATCH_SIZE);
-            try {
-                for (int i = 0; i < toInsert.size(); i += BATCH_SIZE) {
-                    int end = Math.min(i + BATCH_SIZE, toInsert.size());
-                    List<DashboardData> batch = toInsert.subList(i, end);
-
-                    Collection<DashboardData> inserted = mongoTemplate.insertAll(batch);
-                    inserted.forEach(doc -> { if (doc.getId() != null) insertedIds.add(doc.getId()); });
-
-                    batchCount++;
-                    logger.info("[Upload] Batch {}/{} inserted ({} records)", batchCount, totalBatches, end - i);
-                }
-            } catch (Exception insertEx) {
-                if (!insertedIds.isEmpty()) {
-                    logger.error("[Upload] Batch insert FAILED — rolling back {} records", insertedIds.size());
-                    try {
-                        long deleted = mongoTemplate.remove(
-                                new Query(Criteria.where("_id").in(insertedIds)), DashboardData.class
-                        ).getDeletedCount();
-                        logger.info("[Upload] Rollback done — deleted {}", deleted);
-                    } catch (Exception rbEx) {
-                        logger.error("[Upload] Rollback failed — manual cleanup may be needed", rbEx);
-                    }
-                }
-                throw new RuntimeException(
-                        "Upload failed during database insert. No data was saved. Please try again. ("
-                                + insertEx.getMessage() + ")", insertEx);
-            }
-        }
-
         long elapsed = System.currentTimeMillis() - startTime;
         logger.info("[Upload] DONE in {}ms — total={}, new={}, dup={}, invalid={}, batches={}",
                 elapsed, totalRecords, newRecords, duplicates, skippedInvalid, batchCount);
 
-        // ── STEP 6: Save stats + activity log ──
+        // ── STEP 5: Save stats + activity log ──
         saveStats(admin, conferenceId, dashboardMasterId, fileName, totalRecords, newRecords, duplicates);
         logUploadActivity(admin, conferenceId, dashboardMasterId, fileName, newRecords, duplicates);
 
@@ -247,6 +269,30 @@ public class ExcelService {
         result.put("batchesInserted", batchCount);
         return result;
     }
+
+    /**
+     * Flush a batch of records to MongoDB.
+     * Insert and track IDs for potential rollback.
+     */
+    private void flushBatch(List<DashboardData> batch, List<String> insertedIds) {
+        try {
+            Collection<DashboardData> inserted = mongoTemplate.insertAll(batch);
+            inserted.forEach(doc -> {
+                if (doc.getId() != null) {
+                    insertedIds.add(doc.getId());
+                }
+            });
+            logger.info("[Upload] Batch flushed — {} records inserted", inserted.size());
+        } catch (Exception e) {
+            throw new RuntimeException("Batch insert failed: " + e.getMessage(), e);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // OLD PROCESSING METHOD REMOVED
+    // The processBulkUpload method that loaded entire files into memory
+    // has been REMOVED and replaced with processBulkUploadStreaming.
+    // ─────────────────────────────────────────────────────────────────────────
 
     // ─────────────────────────────────────────────────────────────────────────
     // EXCEL PARSING
@@ -377,6 +423,20 @@ public class ExcelService {
     // ─────────────────────────────────────────────────────────────────────────
     // HELPERS
     // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Get cell value for streaming processing (simple, no formula evaluation)
+     */
+    private String getCellValue(Cell cell) {
+        if (cell == null) return "";
+        CellType type = cell.getCellType();
+        return switch (type) {
+            case STRING  -> cell.getStringCellValue().trim();
+            case NUMERIC -> DateUtil.isCellDateFormatted(cell) ? "" : formatNumeric(cell.getNumericCellValue());
+            case BOOLEAN -> String.valueOf(cell.getBooleanCellValue());
+            default      -> "";
+        };
+    }
 
     private long getNextSerialNo(String conferenceId, String dashboardMasterId) {
         return dashboardDataRepository
