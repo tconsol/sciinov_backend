@@ -133,8 +133,8 @@ public class ExcelService {
         // ── STEP 2: Get next serial number ──
         long nextSerial = getNextSerialNo(conferenceId, dashboardMasterId);
 
-        // ── STEP 3: Stream through Excel file row by row ──
-        List<DashboardData> toInsert = new ArrayList<>(5_000); // Keep batch size at 5000
+        // ── Variables to track processing ──
+        List<DashboardData> toInsert = new ArrayList<>(5_000);
         Set<String> fileEmails = new HashSet<>();
         int newRecords = 0, duplicates = 0, skippedInvalid = 0;
         int emptyEmailCount = 0, noAtSignCount = 0;
@@ -144,20 +144,53 @@ public class ExcelService {
         LocalDateTime now = LocalDateTime.now();
         int batchCount = 0;
 
+        // ── STEP 3: Stream through Excel file row by row ──
         try (Workbook workbook = new XSSFWorkbook(file.getInputStream())) {
             Sheet sheet = workbook.getSheetAt(0);
             Iterator<Row> rows = sheet.iterator();
 
-            // Skip header row
+            // ── STEP 3a: Parse header to find column indices ──
+            Row headerRow = null;
             if (rows.hasNext()) {
-                rows.next();
+                headerRow = rows.next();
             }
 
-            // Stream through rows
+            if (headerRow == null) {
+                throw new IOException("Excel file has no header row. Row 1 must contain column headers (Name, Email).");
+            }
+
+            // Build header map to find column indices
+            Map<String, Integer> headerMap = new HashMap<>();
+            for (Cell cell : headerRow) {
+                if (cell != null) {
+                    String header = getCellValue(cell).trim().toLowerCase();
+                    if (!header.isEmpty()) {
+                        String normalizedHeader = normalizeHeaderName(header);
+                        headerMap.put(normalizedHeader, cell.getColumnIndex());
+                    }
+                }
+            }
+            logger.info("[Upload] Excel Headers Found: {}", headerMap.keySet());
+
+            // Find Email column (required)
+            Integer emailColIndex = findColumnByNames(headerMap, "email", "e-mail", "mail", "email_address");
+            if (emailColIndex == null) {
+                throw new IOException("❌ Excel file missing required 'Email' column. Found columns: " + headerMap.keySet());
+            }
+
+            // Find Name column (optional)
+            Integer nameColIndex = findColumnByNames(headerMap, "name", "full_name", "firstname", "first_name", "user_name", "username");
+            logger.info("[Upload] Column Mapping - Email: {}, Name: {}", emailColIndex, nameColIndex != null ? nameColIndex : "N/A");
+
+            final int emailCol = emailColIndex;
+            final int nameCol = (nameColIndex != null) ? nameColIndex : -1;
+
+            // ── STEP 3b: Stream through data rows ──
+
             while (rows.hasNext()) {
                 Row row = rows.next();
-                String rawName = getCellValue(row.getCell(0));
-                String rawEmail = getCellValue(row.getCell(1));
+                String rawName = (nameCol >= 0) ? getCellValue(row.getCell(nameCol)) : "";
+                String rawEmail = getCellValue(row.getCell(emailCol));
 
                 totalRecords++;
 
@@ -197,6 +230,13 @@ public class ExcelService {
                 data.setDashboardMasterId(dashboardMasterId);
                 data.setName(isBlank(rawName) ? "" : rawName.trim());
                 data.setEmail(emailNorm);
+
+                // Extract email extension (domain/TLD part after @)
+                if (emailNorm.contains("@")) {
+                    String extension = emailNorm.substring(emailNorm.indexOf("@") + 1);
+                    data.setEmailExtension(extension);
+                }
+
                 data.setStatus(true);
                 data.setCreatedAt(now);
                 data.setUpdatedAt(now);
