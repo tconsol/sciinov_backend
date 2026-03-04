@@ -425,17 +425,6 @@ public class DashboardDataController {
         return ResponseEntity.ok(response);
     }
 
-    /**
-     * Check upload progress in real-time
-     * GET /api/dashboard-data/upload/progress/{uploadId}
-     */
-    @GetMapping("/upload/progress/{uploadId}")
-    @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<Map<String, Object>> getUploadProgress(@PathVariable String uploadId) {
-        logger.info("GET /api/dashboard-data/upload/progress - uploadId: {}", uploadId);
-        Map<String, Object> progress = excelService.getUploadProgress(uploadId);
-        return ResponseEntity.ok(progress);
-    }
 
     private void validateAccess(String conferenceId) {
         UserDetailsImpl userDetails = (UserDetailsImpl) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
