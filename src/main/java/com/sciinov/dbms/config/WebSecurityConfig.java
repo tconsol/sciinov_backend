@@ -104,6 +104,7 @@ public class WebSecurityConfig {
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         // Public endpoints
                         .requestMatchers("/api/auth/signin").permitAll()
+                        .requestMatchers("/api/auth/logout").permitAll()
                         .requestMatchers("/api/auth/refresh-token").permitAll()
                         .requestMatchers("/api/auth/forgot-password").permitAll()
                         .requestMatchers("/api/auth/validate-reset-token").permitAll()
