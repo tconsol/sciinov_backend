@@ -3,15 +3,19 @@ package com.sciinov.dbms.controller;
 import com.sciinov.dbms.dto.ConferenceDocumentResponse;
 import com.sciinov.dbms.entity.ConferenceDocument;
 import com.sciinov.dbms.entity.ConferenceDocumentLog;
+import com.sciinov.dbms.entity.DocumentTypeEntity;
 import com.sciinov.dbms.entity.User;
 import com.sciinov.dbms.security.UserDetailsImpl;
 import com.sciinov.dbms.service.ConferenceDocumentLogService;
 import com.sciinov.dbms.service.ConferenceDocumentService;
+import com.sciinov.dbms.service.DocumentTypeService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.InputStreamResource;
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -23,8 +27,10 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.util.*;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @RestController
@@ -38,6 +44,9 @@ public class ConferenceDocumentController {
 
     @Autowired
     private ConferenceDocumentLogService conferenceDocumentLogService;
+
+    @Autowired
+    private DocumentTypeService documentTypeService;
 
     // ─────────────────────────────────────────────────────────────────
     // Helper: get authenticated user details
@@ -67,14 +76,14 @@ public class ConferenceDocumentController {
     @PostMapping("/upload")
     @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
     @Operation(summary = "Upload conference document",
-        description = "Upload Program, Book, or Positive Sheets. If file already exists for this conference/year/type, it will be replaced.")
+        description = "Upload Program, Book, or Positive Sheets. Supports multiple Excel formats (.xls, .xlsx, .xlsm) and other documents. If file already exists for this conference/year/type, it will be replaced.")
     public ResponseEntity<?> uploadDocument(
             @RequestParam String conferenceId,
             @RequestParam Integer year,
             @RequestParam String documentType,
             @RequestParam("file") MultipartFile file,
             @RequestHeader(value = "X-Forwarded-For", required = false) String xForwardedFor,
-            jakarta.servlet.http.HttpServletRequest request) {
+            HttpServletRequest request) {
         try {
             // Validate admin is assigned to this conference
             validateConferenceAccess(conferenceId);
@@ -91,8 +100,25 @@ public class ConferenceDocumentController {
                 return ResponseEntity.badRequest().body(Map.of("success", false, "message", "File is empty"));
             }
 
-            // Normalise to lowercase slug (e.g., "PROGRAM" → "program", "Positive Sheets" → "positive_sheets")
-            String typeSlug = documentType.trim().toLowerCase().replace(' ', '_').replace('-', '_');
+            // Resolve documentType: could be ID or slug
+            // If it looks like a MongoDB ObjectId (24 hex chars), try to look it up
+            String typeSlug = documentType.trim();
+            if (isMongoObjectId(typeSlug)) {
+                // Frontend sent the document type ID, look up the slug
+                Optional<DocumentTypeEntity> docTypeOpt = documentTypeService.findById(typeSlug);
+                if (docTypeOpt.isPresent()) {
+                    typeSlug = docTypeOpt.get().getSlug();
+                    logger.info("Resolved document type ID {} to slug: {}", documentType, typeSlug);
+                } else {
+                    return ResponseEntity.badRequest().body(Map.of(
+                        "success", false,
+                        "message", "Invalid document type ID: '" + documentType + "'. Use GET /api/document-types/active to see available types."
+                    ));
+                }
+            } else {
+                // Frontend sent the slug, normalize it to lowercase
+                typeSlug = typeSlug.toLowerCase().replace(' ', '_').replace('-', '_');
+            }
 
             int currentYear = java.time.Year.now().getValue();
             if (year < 2000 || year > currentYear + 10) {
@@ -300,7 +326,7 @@ public class ConferenceDocumentController {
     public ResponseEntity<?> getDocumentById(
             @PathVariable String id,
             @RequestHeader(value = "X-Forwarded-For", required = false) String xForwardedFor,
-            jakarta.servlet.http.HttpServletRequest request) {
+            HttpServletRequest request) {
         try {
             Optional<ConferenceDocument> docOpt = conferenceDocumentService.getDocumentById(id);
             if (docOpt.isEmpty()) {
@@ -337,7 +363,7 @@ public class ConferenceDocumentController {
     public ResponseEntity<?> downloadDocument(
             @PathVariable String id,
             @RequestHeader(value = "X-Forwarded-For", required = false) String xForwardedFor,
-            jakarta.servlet.http.HttpServletRequest request) {
+            HttpServletRequest request) {
         try {
             Optional<ConferenceDocument> docOpt = conferenceDocumentService.getDocumentById(id);
             if (docOpt.isEmpty()) {
@@ -373,7 +399,7 @@ public class ConferenceDocumentController {
                 .header("Cache-Control", "no-cache, no-store, must-revalidate")
                 .header("Pragma", "no-cache")
                 .header("Expires", "0")
-                .body(new org.springframework.core.io.InputStreamResource(new java.io.ByteArrayInputStream(fileContent)));
+                .body(new InputStreamResource(new ByteArrayInputStream(fileContent)));
 
         } catch (AccessDeniedException e) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("success", false, "message", e.getMessage()));
@@ -398,7 +424,7 @@ public class ConferenceDocumentController {
     public ResponseEntity<?> downloadDocumentProxy(
             @PathVariable String id,
             @RequestHeader(value = "X-Forwarded-For", required = false) String xForwardedFor,
-            jakarta.servlet.http.HttpServletRequest request) {
+            HttpServletRequest request) {
         // Delegate to the main download endpoint logic
         return downloadDocument(id, xForwardedFor, request);
     }
@@ -414,7 +440,7 @@ public class ConferenceDocumentController {
     public ResponseEntity<?> deleteDocument(
             @PathVariable String id,
             @RequestHeader(value = "X-Forwarded-For", required = false) String xForwardedFor,
-            jakarta.servlet.http.HttpServletRequest request) {
+            HttpServletRequest request) {
         try {
             Optional<ConferenceDocument> docOpt = conferenceDocumentService.getDocumentById(id);
             if (docOpt.isEmpty()) {
@@ -571,6 +597,7 @@ public class ConferenceDocumentController {
         if (n.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
         if (n.endsWith(".doc")) return "application/msword";
         if (n.endsWith(".xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        if (n.endsWith(".xlsm")) return "application/vnd.ms-excel.sheet.macroEnabled.12";  // Macro-enabled Excel
         if (n.endsWith(".xls")) return "application/vnd.ms-excel";
         if (n.endsWith(".pptx")) return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
         if (n.endsWith(".ppt")) return "application/vnd.ms-powerpoint";
@@ -582,7 +609,7 @@ public class ConferenceDocumentController {
         return "application/octet-stream";
     }
 
-    private String getClientIpAddress(String xForwardedFor, jakarta.servlet.http.HttpServletRequest request) {
+    private String getClientIpAddress(String xForwardedFor, HttpServletRequest request) {
         if (xForwardedFor != null && !xForwardedFor.isEmpty()) {
             return xForwardedFor.split(",")[0].trim();
         }
@@ -593,6 +620,18 @@ public class ConferenceDocumentController {
     private String sanitizeFileName(String fileName) {
         if (fileName == null || fileName.isEmpty()) return "document";
         return fileName.replace("\"", "\\\"").replace("\n", "").replace("\r", "");
+    }
+
+    /**
+     * Check if a string is a valid MongoDB ObjectId (24 hexadecimal characters).
+     * MongoDB ObjectIds are exactly 24 hex characters long (0-9, a-f, A-F).
+     */
+    private boolean isMongoObjectId(String str) {
+        if (str == null || str.length() != 24) {
+            return false;
+        }
+        // Check if all characters are valid hexadecimal (0-9, a-f, A-F)
+        return str.matches("[0-9a-fA-F]{24}");
     }
 }
 

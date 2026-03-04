@@ -1,5 +1,12 @@
 package com.sciinov.dbms.dto;
 
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
 public class MessageResponse {
     private String message;
     private boolean success;
@@ -8,16 +15,4 @@ public class MessageResponse {
         this.message = message;
         this.success = true;
     }
-
-    public MessageResponse(String message, boolean success) {
-        this.message = message;
-        this.success = success;
-    }
-
-    // Getters and Setters
-    public String getMessage() { return message; }
-    public void setMessage(String message) { this.message = message; }
-    public boolean isSuccess() { return success; }
-    public void setSuccess(boolean success) { this.success = success; }
 }
-

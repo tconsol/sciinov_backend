@@ -15,6 +15,7 @@ import java.util.Optional;
 public interface DashboardDataRepository extends MongoRepository<DashboardData, String> {
     Optional<DashboardData> findByConferenceIdAndDashboardMasterIdAndEmail(String conferenceId, String dashboardMasterId, String email);
 
+
     // Legacy (Sort-based) — kept for backward compat
     List<DashboardData> findByConferenceIdAndDashboardMasterIdAndSerialNoBetween(
             String conferenceId, String dashboardMasterId, Long fromSerialNo, Long toSerialNo, Sort sort);

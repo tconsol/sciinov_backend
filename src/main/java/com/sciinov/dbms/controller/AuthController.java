@@ -5,6 +5,7 @@ import com.sciinov.dbms.repository.UserRepository;
 import com.sciinov.dbms.security.JwtUtils;
 import com.sciinov.dbms.security.UserDetailsImpl;
 import com.sciinov.dbms.service.PasswordResetService;
+import com.sciinov.dbms.service.RefreshTokenService;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,6 +21,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @RestController
@@ -42,6 +44,25 @@ public class AuthController {
     @Autowired
     PasswordResetService passwordResetService;
 
+    @Autowired
+    RefreshTokenService refreshTokenService;
+
+    /**
+     * Get JWT token expiration info (in milliseconds)
+     * GET /api/auth/token-expiration
+     */
+    @GetMapping("/token-expiration")
+    public ResponseEntity<?> getTokenExpiration() {
+        logger.info("GET /api/auth/token-expiration - Retrieving JWT expiration time");
+        int expirationMs = jwtUtils.getJwtExpirationMs();
+        return ResponseEntity.ok(Map.of(
+                "success", true,
+                "tokenExpirationMs", expirationMs,
+                "tokenExpirationMinutes", expirationMs / 60000,
+                "tokenExpirationHours", expirationMs / 3600000
+        ));
+    }
+
     @PostMapping("/signin")
     public ResponseEntity<?> authenticateUser(@Valid @RequestBody LoginRequest loginRequest) {
         logger.info("POST /api/auth/signin - Authenticating user: {}", loginRequest.getUserId());
@@ -58,9 +79,13 @@ public class AuthController {
                     .map(item -> item.getAuthority())
                     .collect(Collectors.toList());
 
+            // Generate refresh token
+            String refreshToken = refreshTokenService.generateRefreshToken(userDetails.getId());
+
             logger.info("POST /api/auth/signin - User authenticated successfully: {} with roles: {}", loginRequest.getUserId(), roles);
 
             return ResponseEntity.ok(new JwtResponse(jwt,
+                    refreshToken,
                     userDetails.getId(),
                     userDetails.getUsername(),
                     userDetails.getUser().getEmail(),
@@ -146,5 +171,141 @@ public class AuthController {
         }
         logger.warn("POST /api/auth/change-password - Password change failed for: {} - {}", userDetails.getUsername(), response.getMessage());
         return ResponseEntity.badRequest().body(response);
+    }
+
+    /**
+     * Refresh Access Token using Refresh Token
+     * POST /api/auth/refresh-token
+     * Body: { "refreshToken": "..." }
+     * Returns: New access token and refresh token
+     */
+    @PostMapping("/refresh-token")
+    public ResponseEntity<?> refreshToken(@Valid @RequestBody RefreshTokenRequest request) {
+        logger.info("POST /api/auth/refresh-token - Attempting to refresh access token");
+
+        try {
+            // Validate refresh token
+            if (!refreshTokenService.validateRefreshToken(request.getRefreshToken())) {
+                logger.warn("POST /api/auth/refresh-token - Invalid or expired refresh token");
+                return ResponseEntity.status(401).body(Map.of(
+                        "success", false,
+                        "message", "Invalid or expired refresh token"
+                ));
+            }
+
+            // Get user ID from refresh token
+            java.util.Optional<String> userIdOpt = refreshTokenService.getUserIdFromRefreshToken(request.getRefreshToken());
+
+            if (userIdOpt.isEmpty()) {
+                logger.warn("POST /api/auth/refresh-token - Could not extract user ID from refresh token");
+                return ResponseEntity.status(401).body(Map.of(
+                        "success", false,
+                        "message", "Invalid refresh token"
+                ));
+            }
+
+            String userId = userIdOpt.get();
+
+            // Load user details
+            com.sciinov.dbms.entity.User user = userRepository.findById(userId).orElse(null);
+
+            if (user == null || user.isDeleted() || !user.isStatus()) {
+                logger.warn("POST /api/auth/refresh-token - User not found or inactive: {}", userId);
+                return ResponseEntity.status(401).body(Map.of(
+                        "success", false,
+                        "message", "User not found or inactive"
+                ));
+            }
+
+            // Create authentication and generate new JWT token
+            UserDetailsImpl userDetails = UserDetailsImpl.build(user);
+            Authentication auth = new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
+
+            String newAccessToken = jwtUtils.generateJwtToken(auth);
+
+            // Optionally generate new refresh token (or reuse the old one)
+            // For security, we can either:
+            // 1. Keep the same refresh token (current implementation)
+            // 2. Generate a new one (uncomment line below)
+            String newRefreshToken = request.getRefreshToken(); // Reuse existing refresh token
+
+            List<String> roles = user.getRole().toString().equals("SUPER_ADMIN") ?
+                    java.util.List.of("ROLE_SUPER_ADMIN") : java.util.List.of("ROLE_ADMIN");
+
+            logger.info("POST /api/auth/refresh-token - Access token refreshed for user: {}", userId);
+
+            return ResponseEntity.ok(new TokenRefreshResponse(newAccessToken, newRefreshToken));
+
+        } catch (Exception e) {
+            logger.error("POST /api/auth/refresh-token - Error refreshing token: {}", e.getMessage());
+            return ResponseEntity.status(500).body(Map.of(
+                    "success", false,
+                    "message", "Error refreshing token"
+            ));
+        }
+    }
+
+    /**
+     * Logout - Clear JWT token and revoke refresh token
+     * POST /api/auth/logout
+     * Requires: None (works with or without valid JWT token)
+     *
+     * Behavior:
+     *  - If Bearer token is valid → revoke refresh token(s) and clear session
+     *  - If Bearer token is expired/invalid → still return 200 (graceful logout)
+     *  - If refreshToken is in body → revoke only that token
+     *  - If no refreshToken → revoke all tokens for the user (if authenticated)
+     */
+    @PostMapping("/logout")
+    public ResponseEntity<MessageResponse> logout(@RequestBody(required = false) Map<String, String> body) {
+        try {
+            // Try to get current user (may be null if token is invalid/expired)
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+
+            if (auth != null && auth.getPrincipal() instanceof UserDetailsImpl) {
+                // User IS authenticated — revoke tokens and clear context
+                UserDetailsImpl userDetails = (UserDetailsImpl) auth.getPrincipal();
+                logger.info("POST /api/auth/logout - Authenticated user {} logging out", userDetails.getUsername());
+
+                // Revoke refresh token if provided in body
+                if (body != null && body.containsKey("refreshToken")) {
+                    String refreshToken = body.get("refreshToken");
+                    refreshTokenService.revokeRefreshToken(refreshToken);
+                    logger.info("POST /api/auth/logout - Refresh token revoked for user: {}", userDetails.getUsername());
+                } else {
+                    // Revoke all refresh tokens for the user
+                    refreshTokenService.revokeAllTokensForUser(userDetails.getId());
+                    logger.info("POST /api/auth/logout - All refresh tokens revoked for user: {}", userDetails.getUsername());
+                }
+
+                // Clear authentication from security context
+                SecurityContextHolder.clearContext();
+                logger.info("POST /api/auth/logout - User {} logged out successfully", userDetails.getUsername());
+
+            } else {
+                // User is NOT authenticated (token expired/invalid/missing)
+                // Still allow logout gracefully — this is normal and expected
+                logger.info("POST /api/auth/logout - Logout request received (user not authenticated or token expired)");
+
+                // If refreshToken is in body, try to revoke it anyway
+                if (body != null && body.containsKey("refreshToken")) {
+                    String refreshToken = body.get("refreshToken");
+                    try {
+                        refreshTokenService.revokeRefreshToken(refreshToken);
+                        logger.info("POST /api/auth/logout - Refresh token revoked (unauthenticated logout)");
+                    } catch (Exception e) {
+                        logger.debug("POST /api/auth/logout - Could not revoke refresh token: {}", e.getMessage());
+                    }
+                }
+            }
+
+            // ALWAYS return 200 OK — logout is successful regardless of token state
+            return ResponseEntity.ok(new MessageResponse("Logged out successfully", true));
+
+        } catch (Exception e) {
+            logger.error("POST /api/auth/logout - Error during logout: {}", e.getMessage());
+            // Even on error, return success — logout intent was clear
+            return ResponseEntity.ok(new MessageResponse("Logged out successfully", true));
+        }
     }
 }

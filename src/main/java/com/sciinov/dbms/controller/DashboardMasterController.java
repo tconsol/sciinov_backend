@@ -10,6 +10,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/dashboard-masters")
@@ -19,6 +20,26 @@ public class DashboardMasterController {
     @Autowired
     private DashboardMasterService dashboardMasterService;
 
+    /**
+     * Get all dashboard types (active + inactive)
+     * SUPER_ADMIN and ADMIN can access
+     */
+    @GetMapping("/types")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
+    public ResponseEntity<?> getDashboardTypes() {
+        logger.info("GET /api/dashboard-masters/types - Retrieving all dashboard types");
+        List<DashboardMaster> types = dashboardMasterService.getAllDashboardMasters();
+        logger.info("GET /api/dashboard-masters/types - Retrieved {} dashboard types", types.size());
+        return ResponseEntity.ok(Map.of(
+                "success", true,
+                "total", types.size(),
+                "data", types
+        ));
+    }
+
+    /**
+     * Get all dashboard masters
+     */
     @GetMapping
     @PreAuthorize("hasRole('SUPER_ADMIN') or hasRole('ADMIN')")
     public List<DashboardMaster> getAllDashboardMasters() {

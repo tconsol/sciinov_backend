@@ -5,6 +5,7 @@ import com.sciinov.dbms.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
@@ -20,6 +21,7 @@ public class UserDetailsServiceImpl implements UserDetailsService {
 
     @Override
     @Transactional
+    @Cacheable(value = "userDetails", key = "#userId")
     public UserDetails loadUserByUsername(String userId) throws UsernameNotFoundException {
         logger.info("Loading user details for userId: {}", userId);
         User user = userRepository.findByUserIdAndDeletedFalse(userId)

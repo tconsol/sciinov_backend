@@ -15,8 +15,8 @@ import java.time.LocalDateTime;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Document(collection = "password_reset_tokens")
-public class PasswordResetToken {
+@Document(collection = "refresh_tokens")
+public class RefreshToken {
 
     @Id
     private String id;
@@ -24,17 +24,18 @@ public class PasswordResetToken {
     @Indexed(unique = true)
     private String token;
 
+    @Indexed
     private String userId;
 
     private LocalDateTime expiryDate;
 
-    @Builder.Default
-    private boolean used = false;
-
     @CreatedDate
     private LocalDateTime createdAt;
 
-    public PasswordResetToken(String token, String userId, LocalDateTime expiryDate) {
+    @Builder.Default
+    private boolean revoked = false;
+
+    public RefreshToken(String token, String userId, LocalDateTime expiryDate) {
         this.token = token;
         this.userId = userId;
         this.expiryDate = expiryDate;

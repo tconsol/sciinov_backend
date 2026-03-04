@@ -83,6 +83,25 @@ public class ConferenceService {
     }
 
     /**
+     * Update only the status of a conference
+     * Returns all conference data in response
+     */
+    public Conference updateConferenceStatus(String id, Conference.Status status) {
+        logger.info("Updating status of conference: {} to {}", id, status);
+
+        Conference conference = conferenceRepository.findByIdAndDeletedFalse(id)
+                .orElseThrow(() -> new RuntimeException("Conference not found"));
+
+        conference.setStatus(status);
+        conference.setUpdatedAt(LocalDateTime.now());
+
+        Conference updated = conferenceRepository.save(conference);
+        logger.info("Successfully updated status of conference: {} to {}", id, status);
+
+        return updated;
+    }
+
+    /**
      * Attach dashboards to a conference
      */
     public Conference attachDashboards(String conferenceId, List<String> dashboardMasterIds) {
@@ -201,6 +220,32 @@ public class ConferenceService {
         logger.info("Successfully uploaded image for conference: {}, Blob: {}", conferenceId, blobName);
 
         return updated;
+    }
+
+    /**
+     * Get overall conference records count (non-deleted)
+     */
+    public long getTotalConferenceCount() {
+        return conferenceRepository.findByDeletedFalse().size();
+    }
+
+    /**
+     * Get dashboard count connected to a particular conference
+     */
+    public long getDashboardCountForConference(String conferenceId) {
+        Conference conference = conferenceRepository.findByIdAndDeletedFalse(conferenceId)
+                .orElseThrow(() -> new RuntimeException("Conference not found"));
+
+        List<String> dashboardIds = conference.getDashboardMasterIds();
+        if (dashboardIds == null || dashboardIds.isEmpty()) {
+            return 0;
+        }
+
+        // Count only non-deleted dashboards
+        return dashboardMasterRepository.findAllById(dashboardIds)
+                .stream()
+                .filter(dm -> !dm.isDeleted())
+                .count();
     }
 
     /**

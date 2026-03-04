@@ -1,20 +1,28 @@
 package com.sciinov.dbms.dto;
 
 import com.sciinov.dbms.entity.ConferenceDocument;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
 import java.time.LocalDateTime;
 
-/**
- * Response DTO for conference documents
- */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
 public class ConferenceDocumentResponse {
     private String id;
     private String conferenceId;
     private String conferenceName;
     private Integer year;
+    /** Slug, e.g. "program" */
     private String documentType;
+    /** Human-readable name, e.g. "Program" */
     private String documentTypeDisplayName;
     private String fileName;
-    private String blobName;   // GCS blob name (exact path in bucket)
+    private String blobName;
     private String filePath;
     private String publicUrl;
     private Long fileSize;
@@ -24,14 +32,14 @@ public class ConferenceDocumentResponse {
     private String uploadedByUserId;
     private String uploadedByUserName;
 
-    // Constructor from Entity
+    /** Convenience constructor: map from entity */
     public ConferenceDocumentResponse(ConferenceDocument doc) {
         this.id = doc.getId();
         this.conferenceId = doc.getConferenceId();
         this.conferenceName = doc.getConferenceName();
         this.year = doc.getYear();
-        this.documentType = doc.getDocumentType();                       // slug e.g. "program"
-        this.documentTypeDisplayName = doc.getDocumentTypeDisplayName(); // e.g. "Program"
+        this.documentType = doc.getDocumentType();
+        this.documentTypeDisplayName = doc.getDocumentTypeDisplayName();
         this.fileName = doc.getFileName();
         this.blobName = doc.getBlobName();
         this.filePath = doc.getFilePath();
@@ -43,134 +51,4 @@ public class ConferenceDocumentResponse {
         this.uploadedByUserId = doc.getUploadedByUserId();
         this.uploadedByUserName = doc.getUploadedByUserName();
     }
-
-    // Getters and Setters
-    public String getId() {
-        return id;
-    }
-
-    public void setId(String id) {
-        this.id = id;
-    }
-
-    public String getConferenceId() {
-        return conferenceId;
-    }
-
-    public void setConferenceId(String conferenceId) {
-        this.conferenceId = conferenceId;
-    }
-
-    public String getConferenceName() {
-        return conferenceName;
-    }
-
-    public void setConferenceName(String conferenceName) {
-        this.conferenceName = conferenceName;
-    }
-
-    public Integer getYear() {
-        return year;
-    }
-
-    public void setYear(Integer year) {
-        this.year = year;
-    }
-
-    public String getDocumentType() {
-        return documentType;
-    }
-
-    public void setDocumentType(String documentType) {
-        this.documentType = documentType;
-    }
-
-    public String getDocumentTypeDisplayName() {
-        return documentTypeDisplayName;
-    }
-
-    public void setDocumentTypeDisplayName(String documentTypeDisplayName) {
-        this.documentTypeDisplayName = documentTypeDisplayName;
-    }
-
-    public String getFileName() {
-        return fileName;
-    }
-
-    public void setFileName(String fileName) {
-        this.fileName = fileName;
-    }
-
-    public String getBlobName() {
-        return blobName;
-    }
-
-    public void setBlobName(String blobName) {
-        this.blobName = blobName;
-    }
-
-    public String getFilePath() {
-        return filePath;
-    }
-
-    public void setFilePath(String filePath) {
-        this.filePath = filePath;
-    }
-
-    public String getPublicUrl() {
-        return publicUrl;
-    }
-
-    public void setPublicUrl(String publicUrl) {
-        this.publicUrl = publicUrl;
-    }
-
-    public Long getFileSize() {
-        return fileSize;
-    }
-
-    public void setFileSize(Long fileSize) {
-        this.fileSize = fileSize;
-    }
-
-    public String getContentType() {
-        return contentType;
-    }
-
-    public void setContentType(String contentType) {
-        this.contentType = contentType;
-    }
-
-    public LocalDateTime getUploadedAt() {
-        return uploadedAt;
-    }
-
-    public void setUploadedAt(LocalDateTime uploadedAt) {
-        this.uploadedAt = uploadedAt;
-    }
-
-    public LocalDateTime getUpdatedAt() {
-        return updatedAt;
-    }
-
-    public void setUpdatedAt(LocalDateTime updatedAt) {
-        this.updatedAt = updatedAt;
-    }
-
-    public String getUploadedByUserId() {
-        return uploadedByUserId;
-    }
-
-    public void setUploadedByUserId(String uploadedByUserId) {
-        this.uploadedByUserId = uploadedByUserId;
-    }
-
-    public String getUploadedByUserName() {
-        return uploadedByUserName;
-    }
-
-    public void setUploadedByUserName(String uploadedByUserName) {
-        this.uploadedByUserName = uploadedByUserName;
-    }
 }
-

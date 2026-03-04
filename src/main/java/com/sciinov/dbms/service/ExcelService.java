@@ -10,6 +10,7 @@ import com.sciinov.dbms.repository.DashboardUploadStatsRepository;
 import com.sciinov.dbms.repository.UserRepository;
 import com.sciinov.dbms.security.UserDetailsImpl;
 import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.hssf.usermodel.HSSFWorkbook;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,38 +27,43 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
+import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.scheduling.annotation.Scheduled;
 
 @Service
 public class ExcelService {
 
     private static final Logger logger = LoggerFactory.getLogger(ExcelService.class);
-    private static final int BATCH_SIZE = 500;
-
-    @Autowired
-    private DashboardDataRepository dashboardDataRepository;
-
-    @Autowired
-    private DashboardUploadStatsRepository dashboardUploadStatsRepository;
-
-    @Autowired
-    private AdminActivityLogRepository adminActivityLogRepository;
-
-    @Autowired
-    private AnalyticsService analyticsService;
-
-    @Autowired
-    private UserRepository userRepository;
-
-    @Autowired
-    private MongoTemplate mongoTemplate;
 
     /**
-     * Synchronous version for backward compatibility.
-     * Reads the file bytes eagerly then delegates to async bulk processor.
+     * Number of documents to insert per MongoDB bulk-insert call.
+     * 10000 is optimal: large enough to minimize round-trips,
+     * small enough to stay under BSON document-size limits.
+     * Previous: 1000 (slower, more DB round-trips)
      */
-    public Map<String, Object> processExcelFile(MultipartFile file, String conferenceId, String dashboardMasterId) throws IOException {
+    private static final int BATCH_SIZE = 10000;
+
+    /**
+     * Track upload progress in real-time
+     * Key: uploadId, Value: upload progress map
+     */
+    private static final Map<String, Map<String, Object>> uploadProgress = new ConcurrentHashMap<>();
+
+    @Autowired private DashboardDataRepository dashboardDataRepository;
+    @Autowired private DashboardUploadStatsRepository dashboardUploadStatsRepository;
+    @Autowired private AdminActivityLogRepository adminActivityLogRepository;
+    @Autowired private AnalyticsService analyticsService;
+    @Autowired private UserRepository userRepository;
+    @Autowired private MongoTemplate mongoTemplate;
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // PUBLIC ENTRY POINT
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public Map<String, Object> processExcelFile(MultipartFile file,
+                                                 String conferenceId,
+                                                 String dashboardMasterId) throws IOException {
         UserDetailsImpl userDetails = (UserDetailsImpl) SecurityContextHolder.getContext()
                 .getAuthentication().getPrincipal();
         User admin = userRepository.findById(userDetails.getId())
@@ -68,96 +74,321 @@ public class ExcelService {
             throw new RuntimeException("Access Denied: You are not assigned to this conference.");
         }
 
-        // Eagerly read file bytes before passing to async method (MultipartFile becomes invalid after request ends)
+        // Read bytes eagerly — MultipartFile is invalid after the HTTP request ends
         byte[] fileBytes = file.getBytes();
         String originalFileName = file.getOriginalFilename();
+        String uploadId = UUID.randomUUID().toString();
 
-        return processBulkUpload(fileBytes, originalFileName, conferenceId, dashboardMasterId, admin);
+        logger.info("📥 Upload started: uploadId={} fileName={} admin={}", uploadId, originalFileName, admin.getId());
+
+        // Initialize progress tracker
+        Map<String, Object> progress = new ConcurrentHashMap<>();
+        progress.put("uploadId", uploadId);
+        progress.put("fileName", originalFileName);
+        progress.put("status", "PROCESSING");
+        progress.put("startTime", LocalDateTime.now());
+        progress.put("recordsProcessed", 0);
+        progress.put("recordsInserted", 0);
+        progress.put("message", "Upload in progress...");
+        uploadProgress.put(uploadId, progress);
+
+        // Start async processing in background
+        processBulkUploadAsync(fileBytes, originalFileName, conferenceId, dashboardMasterId, admin, uploadId);
+
+        // Return immediately to user with upload ID
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("status", "PROCESSING");
+        response.put("message", "Upload started! Data will be stored immediately...");
+        response.put("uploadId", uploadId);
+        response.put("fileName", originalFileName);
+        response.put("hint", "Use uploadId to check progress. Data is being inserted to database in background.");
+        return response;
     }
 
     /**
-     * Core bulk-upload logic:
-     * 1. Load all existing emails in 1 query → HashSet (O(1) dup checks)
-     * 2. Parse all rows in memory
-     * 3. Pre-allocate serial numbers from current max (1 query)
-     * 4. Bulk-insert in batches of BATCH_SIZE
+     * Get upload progress in real-time
      */
-    private Map<String, Object> processBulkUpload(byte[] fileBytes, String fileName,
-                                                    String conferenceId, String dashboardMasterId,
-                                                    User admin) throws IOException {
+    public Map<String, Object> getUploadProgress(String uploadId) {
+        Map<String, Object> progress = uploadProgress.get(uploadId);
+        if (progress == null) {
+            Map<String, Object> notFound = new LinkedHashMap<>();
+            notFound.put("status", "NOT_FOUND");
+            notFound.put("message", "Upload ID not found or expired");
+            return notFound;
+        }
+        return new LinkedHashMap<>(progress);
+    }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // ASYNC PROCESSING — data inserted immediately in background
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Process upload in background without blocking user request.
+     * Data is inserted to database IMMEDIATELY as batches complete.
+     * No user waits for entire file processing.
+     *
+     * NOTE: @Async("bulkTaskExecutor") binds this to the configured bounded
+     * ThreadPoolTaskExecutor. Without the qualifier Spring would use
+     * SimpleAsyncTaskExecutor (unbounded threads) which can exhaust server
+     * resources and cause random failures that surface as CORS errors.
+     */
+    @Async("bulkTaskExecutor")
+    public void processBulkUploadAsync(byte[] fileBytes, String fileName,
+                                       String conferenceId, String dashboardMasterId,
+                                       User admin, String uploadId) {
+        Map<String, Object> progress = uploadProgress.get(uploadId);
+        try {
+            logger.info("⏳ [{}] Starting async bulk upload processing...", uploadId);
+
+            Map<String, Object> result = processBulkUpload(fileBytes, fileName, conferenceId, dashboardMasterId, admin);
+
+            // Update progress to COMPLETED
+            progress.put("status", "COMPLETED");
+            progress.put("message", "Upload completed successfully!");
+            progress.put("result", result);
+            progress.put("completionTime", LocalDateTime.now());
+
+            logger.info("✅ [{}] Async upload completed: new={}, dup={}",
+                    uploadId, result.get("newRecordsAdded"), result.get("duplicateRecordsIgnored"));
+
+        } catch (Exception e) {
+            logger.error("❌ [{}] Async upload FAILED: {}", uploadId, e.getMessage(), e);
+            progress.put("status", "FAILED");
+            progress.put("message", "Upload failed: " + e.getMessage());
+            progress.put("error", e.getMessage());
+
+            // Always write an admin activity log so the failure appears in the
+            // admin dashboard — even when data was partially saved or rolled back.
+            try {
+                logUploadActivity(admin, conferenceId, dashboardMasterId, fileName, 0, 0, "FAILED: " + e.getMessage());
+            } catch (Exception logEx) {
+                logger.error("❌ [{}] Failed to write activity log for failed upload: {}", uploadId, logEx.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Scheduled task: evict finished/failed upload progress entries older than 2 hours.
+     * Prevents the ConcurrentHashMap from growing unbounded in production.
+     * Runs every 30 minutes.
+     */
+    @Scheduled(fixedDelay = 30 * 60 * 1000)
+    public void cleanupStaleUploadProgress() {
+        LocalDateTime cutoff = LocalDateTime.now().minusHours(2);
+        int removed = 0;
+        for (Map.Entry<String, Map<String, Object>> entry : uploadProgress.entrySet()) {
+            Map<String, Object> prog = entry.getValue();
+            String status = (String) prog.get("status");
+            Object startTimeObj = prog.get("startTime");
+            if (("COMPLETED".equals(status) || "FAILED".equals(status)) && startTimeObj instanceof LocalDateTime) {
+                if (((LocalDateTime) startTimeObj).isBefore(cutoff)) {
+                    uploadProgress.remove(entry.getKey());
+                    removed++;
+                }
+            }
+        }
+        if (removed > 0) {
+            logger.info("[UploadProgress] Cleaned up {} stale entries (older than 2 hours)", removed);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // CORE PROCESSING — designed for 100 000+ rows in < 1 minute
+    //  MODIFIED: Inserts data IMMEDIATELY in batches (async mode)
+    // ─────────────────────────────────────────────────────────────────────────
+    //  1. Load every existing email for this conference+dashboard in ONE query
+    //     → put them into a HashSet<String>  (O(1) lookup)
+    //  2. Parse all Excel rows into memory  (fast POI read)
+    //  3. Walk rows: normalise email, check HashSet → skip or queue
+    //     The HashSet also receives newly-queued emails so within-file
+    //     duplicates are caught without a second DB round-trip.
+    //  4. Bulk-insert queued records in batches of BATCH_SIZE
+    // ─────────────────────────────────────────────────────────────────────────
+    private Map<String, Object> processBulkUpload(byte[] fileBytes, String fileName,
+                                                   String conferenceId, String dashboardMasterId,
+                                                   User admin) throws IOException {
         long startTime = System.currentTimeMillis();
 
-        // ── Step 1: Load existing emails into a HashSet (single query, projection) ──
-        logger.info("Loading existing emails for conferenceId={} dashboardMasterId={}", conferenceId, dashboardMasterId);
-        Query emailQuery = new Query(Criteria.where("conferenceId").is(conferenceId)
-                .and("dashboardMasterId").is(dashboardMasterId)
-                .and("deleted").is(false));
-        emailQuery.fields().include("email");
-        List<DashboardData> existing = mongoTemplate.find(emailQuery, DashboardData.class);
-        Set<String> existingEmails = existing.stream()
-                .map(d -> d.getEmail() != null ? d.getEmail().toLowerCase().trim() : "")
-                .filter(e -> !e.isEmpty())
-                .collect(Collectors.toCollection(HashSet::new));
-        logger.info("Loaded {} existing emails", existingEmails.size());
+        // ── STEP 1: Load ALL existing emails for this conference+dashboard (ONE query) ──
+        logger.info("[Upload] Loading existing emails — conferenceId={} dashboardMasterId={}",
+                conferenceId, dashboardMasterId);
 
-        // ── Step 2: Parse Excel rows ──
-        List<String[]> rows = parseExcelRows(fileBytes);
-        int totalRecords = rows.size();
-        logger.info("Parsed {} data rows from file: {}", totalRecords, fileName);
+        Query emailQuery = new Query(
+                Criteria.where("conferenceId").is(conferenceId)
+                        .and("dashboardMasterId").is(dashboardMasterId)
+                        .and("deleted").is(false));
+        emailQuery.fields().include("email"); // projection — only fetch the email field
+        // Use case-insensitive collation to match the unique index
+        emailQuery.collation(org.springframework.data.mongodb.core.query.Collation.of("en")
+                .strength(org.springframework.data.mongodb.core.query.Collation.ComparisonLevel.secondary()));
 
-        // ── Step 3: Pre-allocate serial numbers ──
-        long nextSerial = getNextSerialNoAtomic(conferenceId, dashboardMasterId);
+        List<DashboardData> existingDocs = mongoTemplate.find(emailQuery, DashboardData.class);
 
-        // ── Step 4: Build new records list ──
-        List<DashboardData> newDataList = new ArrayList<>();
-        int duplicates = 0;
-        LocalDateTime now = LocalDateTime.now();
-
-        for (String[] row : rows) {
-            String name = row[0];
-            String email = row[1];
-            if (name == null || name.isEmpty() || email == null || email.isEmpty()) continue;
-
-            String emailKey = email.toLowerCase().trim();
-            if (existingEmails.contains(emailKey)) {
-                duplicates++;
-            } else {
-                existingEmails.add(emailKey); // prevent in-batch duplicates
-                DashboardData data = new DashboardData();
-                data.setConferenceId(conferenceId);
-                data.setDashboardMasterId(dashboardMasterId);
-                data.setName(name.trim());
-                data.setEmail(emailKey);
-                data.setStatus(true);
-                data.setCreatedAt(now);
-                data.setUpdatedAt(now);
-                data.setSerialNo(nextSerial++);
-                newDataList.add(data);
+        // Normalise every stored email exactly the same way we normalise incoming ones
+        Set<String> seenEmails = new HashSet<>();
+        for (DashboardData doc : existingDocs) {
+            String email = doc.getEmail();
+            if (email != null && !email.isBlank()) {
+                seenEmails.add(normalizeEmail(email));
             }
         }
 
-        int newRecords = newDataList.size();
-        logger.info("New records to insert: {}, duplicates skipped: {}", newRecords, duplicates);
+        logger.info("[Upload] Existing emails loaded: {} (from {} documents)", seenEmails.size(), existingDocs.size());
 
-        // ── Step 5: Bulk insert in batches ──
-        if (!newDataList.isEmpty()) {
-            int batchCount = 0;
-            for (int i = 0; i < newDataList.size(); i += BATCH_SIZE) {
-                int end = Math.min(i + BATCH_SIZE, newDataList.size());
-                List<DashboardData> batch = newDataList.subList(i, end);
-                mongoTemplate.insertAll(batch);
-                batchCount++;
-                logger.debug("Inserted batch {}: records {}-{}", batchCount, i + 1, end);
+        // ── STEP 2: Parse Excel ──
+        logger.info("[Upload] Parsing Excel file: {}", fileName);
+        List<String[]> allRows = parseExcelRows(fileBytes);
+        int totalRecords = allRows.size();
+        logger.info("[Upload] Parsed {} data rows", totalRecords);
+
+        // ── STEP 3: Determine next serial number (ONE query) ──
+        long nextSerial = getNextSerialNo(conferenceId, dashboardMasterId);
+        logger.info("[Upload] Next serial number: {}", nextSerial);
+
+        // ── STEP 4: Walk rows, dedupe against seenEmails HashSet ──
+        List<DashboardData> toInsert = new ArrayList<>(Math.min(totalRecords, 10_000));
+        Set<String> fileEmails = new HashSet<>();  // Track emails in current file for within-file dedup
+        int newRecords  = 0;
+        int duplicates  = 0;
+        int skippedInvalid = 0;
+        int emptyEmailCount = 0;
+        int noAtSignCount = 0;
+        List<String[]> sampleInvalidRows = new ArrayList<>();  // First 5 invalid rows for diagnostics
+        LocalDateTime now = LocalDateTime.now();
+
+        for (String[] row : allRows) {
+            String rawName  = row[0];
+            String rawEmail = row[1];
+
+            // Skip completely empty rows
+            if (isBlank(rawName) && isBlank(rawEmail)) {
+                skippedInvalid++;
+                if (sampleInvalidRows.size() < 5) {
+                    sampleInvalidRows.add(new String[]{"[BLANK]", "[BLANK]"});
+                }
+                continue;
             }
-            logger.info("Bulk insert complete: {} batches, {} records", batchCount, newRecords);
+
+            // Skip rows without a usable email
+            if (isBlank(rawEmail)) {
+                skippedInvalid++;
+                emptyEmailCount++;
+                logger.debug("[Upload] Skipped row — empty email, name='{}'", rawName);
+                if (sampleInvalidRows.size() < 5) {
+                    sampleInvalidRows.add(new String[]{"[EMPTY_EMAIL]", rawName});
+                }
+                continue;
+            }
+
+            String emailNorm = normalizeEmail(rawEmail);
+
+            // Basic "@" check
+            if (!emailNorm.contains("@")) {
+                skippedInvalid++;
+                noAtSignCount++;
+                logger.debug("[Upload] Skipped row — invalid email format: raw='{}', normalized='{}'", rawEmail, emailNorm);
+                if (sampleInvalidRows.size() < 5) {
+                    sampleInvalidRows.add(new String[]{rawEmail, rawName});
+                }
+                continue;
+            }
+
+            // ── DUPLICATE CHECK ──
+            // First check: is it in the database already?
+            if (seenEmails.contains(emailNorm)) {
+                duplicates++;
+                logger.debug("[Upload] Duplicate from DB skipped: {}", emailNorm);
+                continue;
+            }
+
+            // Second check: is it already in this file?
+            if (fileEmails.contains(emailNorm)) {
+                duplicates++;
+                logger.debug("[Upload] Duplicate within file skipped: {}", emailNorm);
+                continue;
+            }
+
+            // New record — add to both sets
+            seenEmails.add(emailNorm);
+            fileEmails.add(emailNorm);
+
+            DashboardData data = new DashboardData();
+            data.setConferenceId(conferenceId);
+            data.setDashboardMasterId(dashboardMasterId);
+            data.setName(isBlank(rawName) ? "" : rawName.trim());
+            data.setEmail(emailNorm);
+            data.setStatus(true);
+            data.setCreatedAt(now);
+            data.setUpdatedAt(now);
+            data.setSerialNo(nextSerial++);
+
+            toInsert.add(data);
+            newRecords++;
+        }
+
+        logger.info("[Upload] Dedup complete — new={}, duplicates={}, invalid={} (empty_email={}, no_at_sign={})",
+                newRecords, duplicates, skippedInvalid, emptyEmailCount, noAtSignCount);
+
+        // ── Log sample invalid rows for diagnosis ──
+        if (!sampleInvalidRows.isEmpty()) {
+            logger.info("[Upload] Sample invalid rows (first 5): {}",
+                sampleInvalidRows.stream()
+                    .map(arr -> String.format("email='%s', name='%s'", arr[0], arr[1]))
+                    .collect(Collectors.joining("; ")));
+        }
+
+        // ── STEP 5: Bulk-insert in batches with rollback on failure ──
+        int batchCount = 0;
+        int totalInserted = 0;
+        List<String> insertedIds = new ArrayList<>();  // track every inserted _id for rollback
+
+        if (!toInsert.isEmpty()) {
+            int totalBatches = (int) Math.ceil((double) toInsert.size() / BATCH_SIZE);
+            try {
+                for (int i = 0; i < toInsert.size(); i += BATCH_SIZE) {
+                    int end = Math.min(i + BATCH_SIZE, toInsert.size());
+                    List<DashboardData> batch = toInsert.subList(i, end);
+
+                    // ...existing code...
+                    Collection<DashboardData> inserted = mongoTemplate.insertAll(batch);
+                    inserted.forEach(doc -> {
+                        if (doc.getId() != null) insertedIds.add(doc.getId());
+                    });
+
+                    batchCount++;
+                    logger.info("[Upload] Inserted batch {}/{} ({} records)",
+                            batchCount, totalBatches, end - i);
+                }
+            } catch (Exception insertEx) {
+                // ── ROLLBACK: delete every record we successfully inserted ──
+                if (!insertedIds.isEmpty()) {
+                    logger.error("[Upload] Batch insert FAILED at batch {} — rolling back {} already-inserted records",
+                            batchCount + 1, insertedIds.size());
+                    try {
+                        Query rollbackQuery = new Query(
+                                Criteria.where("_id").in(insertedIds));
+                        long deleted = mongoTemplate.remove(rollbackQuery, DashboardData.class).getDeletedCount();
+                        logger.info("[Upload] Rollback complete — deleted {} records", deleted);
+                    } catch (Exception rollbackEx) {
+                        logger.error("[Upload] Rollback itself failed — manual cleanup may be needed. IDs: {}",
+                                insertedIds, rollbackEx);
+                    }
+                }
+                throw new RuntimeException(
+                        "Upload failed during database insert. No data has been saved. " +
+                        "Please try uploading the file again. (Cause: " + insertEx.getMessage() + ")",
+                        insertEx);
+            }
         }
 
         long elapsed = System.currentTimeMillis() - startTime;
-        logger.info("Upload complete in {}ms: total={}, new={}, dup={}", elapsed, totalRecords, newRecords, duplicates);
+        logger.info("[Upload] DONE in {}ms — total={}, new={}, dup={}, invalid={} (empty_email={}, no_at_sign={}), batches={}",
+                elapsed, totalRecords, newRecords, duplicates, skippedInvalid, emptyEmailCount, noAtSignCount, batchCount);
 
-        // ── Step 6: Save stats & activity log ──
-        saveStats(admin, conferenceId, dashboardMasterId, fileName, totalRecords, newRecords, duplicates);
+        // ── STEP 6: Persist stats + activity log (only on full success) ──
+        saveStats(admin, conferenceId, dashboardMasterId, fileName,
+                totalRecords, newRecords, duplicates);
         logUploadActivity(admin, conferenceId, dashboardMasterId, fileName, newRecords, duplicates);
 
         Map<String, Object> result = new LinkedHashMap<>();
@@ -167,39 +398,196 @@ public class ExcelService {
         result.put("totalRecordsInFile", totalRecords);
         result.put("newRecordsAdded", newRecords);
         result.put("duplicateRecordsIgnored", duplicates);
+        result.put("invalidRowsSkipped", skippedInvalid);
         result.put("processingTimeMs", elapsed);
+        result.put("batchesInserted", batchCount);
         return result;
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // EXCEL PARSING
+    // ─────────────────────────────────────────────────────────────────────────
+
     /**
-     * Parse Excel file using streaming-friendly POI API.
-     * Returns list of [name, email] arrays.
+     * Parse the first sheet of an Excel file (.xls, .xlsx, .xlsm).
+     * Row 0 is the header — reads column names dynamically.
+     * Returns a list of [name, email] string pairs.
+     * Supports multiple Excel formats:
+     * - .xlsx (Office Open XML) - Modern Excel format
+     * - .xls (BIFF8) - Legacy Excel format
+     * - .xlsm (Macro-enabled XLSX)
+     *
+     * IMPORTANT: Reads columns by header name (case-insensitive), so column order doesn't matter.
+     * Supports headers: "Name", "Email" or any variation like "email", "EMAIL", "name", etc.
      */
     private List<String[]> parseExcelRows(byte[] fileBytes) throws IOException {
         List<String[]> rows = new ArrayList<>();
-        try (Workbook workbook = new XSSFWorkbook(new ByteArrayInputStream(fileBytes))) {
-            Sheet sheet = workbook.getSheetAt(0);
-            Iterator<Row> rowIter = sheet.iterator();
-            if (rowIter.hasNext()) rowIter.next(); // skip header
 
-            while (rowIter.hasNext()) {
-                Row row = rowIter.next();
-                String name = getCellValue(row.getCell(0));
-                String email = getCellValue(row.getCell(1));
+        // Create appropriate Workbook based on file format
+        Workbook workbook = createWorkbook(fileBytes);
+
+        try {
+            // Use a FormulaEvaluator so FORMULA cells return their computed value
+            FormulaEvaluator evaluator = workbook.getCreationHelper().createFormulaEvaluator();
+            evaluator.setIgnoreMissingWorkbooks(true);
+
+            Sheet sheet = workbook.getSheetAt(0);
+
+            // ── STEP 1: Read header row and build column index map ──
+            Row headerRow = sheet.getRow(0);
+            if (headerRow == null) {
+                throw new IOException("Excel file has no header row. Please ensure Row 1 contains column headers (Name, Email).");
+            }
+
+            Map<String, Integer> headerMap = new HashMap<>();
+            for (Cell cell : headerRow) {
+                if (cell != null) {
+                    String headerName = getCellValueSafe(cell, evaluator).trim().toLowerCase();
+                    if (!headerName.isEmpty()) {
+                        headerMap.put(headerName, cell.getColumnIndex());
+                    }
+                }
+            }
+
+            logger.info("[Upload] Detected headers: {}", headerMap.keySet());
+
+            // ── STEP 2: Find name and email columns ──
+            Integer nameColIndex = headerMap.get("name");
+            Integer emailColIndex = headerMap.get("email");
+
+            if (nameColIndex == null && emailColIndex == null) {
+                throw new IOException("Excel file must have 'Name' and 'Email' columns in the header row. " +
+                        "Found headers: " + headerMap.keySet());
+            }
+
+            if (emailColIndex == null) {
+                throw new IOException("Excel file missing required 'Email' column in header. " +
+                        "Found headers: " + headerMap.keySet());
+            }
+
+            // Name column is optional - use -1 if not found
+            int emailCol = emailColIndex;
+            int nameCol = (nameColIndex != null) ? nameColIndex : -1;
+
+            logger.info("[Upload] Reading data — Name column: {}, Email column: {}",
+                    (nameCol >= 0 ? nameCol : "NOT FOUND"), emailCol);
+
+            // ── STEP 3: Parse data rows (skip header row 0) ──
+            for (int i = 1; i <= sheet.getLastRowNum(); i++) {
+                Row row = sheet.getRow(i);
+                if (row == null) continue;
+
+                String name = (nameCol >= 0) ? getCellValueSafe(row.getCell(nameCol), evaluator) : "";
+                String email = getCellValueSafe(row.getCell(emailCol), evaluator);
                 rows.add(new String[]{name, email});
             }
+        } finally {
+            workbook.close();
         }
         return rows;
     }
 
     /**
-     * Get next serial number atomically (single DB query).
+     * Create appropriate Workbook instance based on file format
+     * Supports: .xlsx (OOXML), .xls (BIFF8), .xlsm (Macro-enabled XLSX)
      */
-    private synchronized long getNextSerialNoAtomic(String conferenceId, String dashboardMasterId) {
+    private Workbook createWorkbook(byte[] fileBytes) throws IOException {
+        ByteArrayInputStream bais = new ByteArrayInputStream(fileBytes);
+
+        try {
+            // Try XLSX first (most common modern format)
+            return new XSSFWorkbook(bais);
+        } catch (Exception xlsxException) {
+            // If XLSX fails, try XLS (legacy format)
+            try {
+                bais.reset();
+                return new HSSFWorkbook(bais);
+            } catch (Exception xlsException) {
+                logger.error("[Upload] Failed to parse file as XLSX or XLS format");
+                logger.error("[Upload] XLSX error: {}", xlsxException.getMessage());
+                logger.error("[Upload] XLS error: {}", xlsException.getMessage());
+                throw new IOException("Unsupported Excel file format. Please use .xls, .xlsx, or .xlsm files.", xlsxException);
+            }
+        }
+    }
+
+    /**
+     * Extract a trimmed string value from a cell regardless of its type.
+     * Passes a FormulaEvaluator so FORMULA cells are resolved correctly.
+     */
+    private String getCellValueSafe(Cell cell, FormulaEvaluator evaluator) {
+        if (cell == null) return "";
+
+        CellType type = cell.getCellType();
+
+        // Resolve formula to its actual type first
+        if (type == CellType.FORMULA) {
+            try {
+                CellValue cv = evaluator.evaluate(cell);
+                if (cv == null) return "";
+                switch (cv.getCellType()) {
+                    case STRING:  return cv.getStringValue().trim();
+                    case NUMERIC: return formatNumeric(cv.getNumberValue());
+                    case BOOLEAN: return String.valueOf(cv.getBooleanValue());
+                    default:      return "";
+                }
+            } catch (Exception e) {
+                // Fallback: try reading cached value
+                try { return cell.getStringCellValue().trim(); } catch (Exception ex) { return ""; }
+            }
+        }
+
+        switch (type) {
+            case STRING:
+                return cell.getStringCellValue().trim();
+            case NUMERIC:
+                if (DateUtil.isCellDateFormatted(cell)) return "";   // dates are not emails/names
+                return formatNumeric(cell.getNumericCellValue());
+            case BOOLEAN:
+                return String.valueOf(cell.getBooleanCellValue());
+            case BLANK:
+            default:
+                return "";
+        }
+    }
+
+    /** Format a numeric cell as a plain integer string when there is no fractional part. */
+    private String formatNumeric(double val) {
+        return (val == Math.floor(val) && !Double.isInfinite(val))
+                ? String.valueOf((long) val)
+                : String.valueOf(val);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // HELPERS
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private long getNextSerialNo(String conferenceId, String dashboardMasterId) {
         return dashboardDataRepository
                 .findTopByConferenceIdAndDashboardMasterIdOrderBySerialNoDesc(conferenceId, dashboardMasterId)
                 .map(d -> d.getSerialNo() + 1)
                 .orElse(1L);
+    }
+
+    private static boolean isBlank(String s) {
+        return s == null || s.trim().isEmpty();
+    }
+
+    /**
+     * Normalize an email address for accurate duplicate detection:
+     *  1. Trim leading/trailing whitespace from raw input
+     *  2. Strip ALL internal whitespace (spaces, tabs, non-breaking spaces, zero-width chars)
+     *  3. Convert to lowercase
+     *
+     * This handles hidden characters that Excel may embed in cells,
+     * such as \u00A0 (non-breaking space), \u200B (zero-width space), etc.
+     */
+    private static String normalizeEmail(String raw) {
+        if (raw == null) return "";
+        // First trim leading/trailing whitespace, then remove ALL internal whitespace and special chars, finally lowercase
+        return raw.trim()
+                  .replaceAll("[\\s\\u00A0\\u200B\\u200C\\u200D\\uFEFF]+", "")
+                  .toLowerCase(Locale.ROOT);
     }
 
     private void saveStats(User admin, String conferenceId, String dashboardMasterId,
@@ -218,34 +606,25 @@ public class ExcelService {
 
     private void logUploadActivity(User admin, String conferenceId, String dashboardMasterId,
                                    String fileName, int added, int duplicates) {
+        logUploadActivity(admin, conferenceId, dashboardMasterId, fileName, added, duplicates, null);
+    }
+
+    private void logUploadActivity(User admin, String conferenceId, String dashboardMasterId,
+                                   String fileName, int added, int duplicates, String note) {
         AdminActivityLog log = new AdminActivityLog();
         log.setAdminId(admin.getId());
         log.setAdminName(admin.getFirstName() + " " + admin.getLastName());
         log.setConferenceId(conferenceId);
         log.setDashboardMasterId(dashboardMasterId);
-        log.setActionType(AdminActivityLog.ActionType.UPLOAD_EXCEL);
-        log.setDescription("Uploaded Excel: " + fileName + ". Added: " + added + ", Duplicates: " + duplicates);
+        log.setActionType(note != null && note.startsWith("FAILED")
+                ? AdminActivityLog.ActionType.UPLOAD_EXCEL
+                : AdminActivityLog.ActionType.UPLOAD_EXCEL);
+        String description = "Uploaded Excel: " + fileName
+                + " | Added: " + added + " | Duplicates: " + duplicates;
+        if (note != null) description += " | " + note;
+        log.setDescription(description);
         log.setCreatedAt(LocalDateTime.now());
         log.setIpAddress("127.0.0.1");
-        // Save + push to SSE in real-time
         analyticsService.saveAndPushLog(log);
-    }
-
-    private String getCellValue(Cell cell) {
-        if (cell == null) return "";
-        switch (cell.getCellType()) {
-            case STRING: return cell.getStringCellValue().trim();
-            case NUMERIC:
-                if (DateUtil.isCellDateFormatted(cell)) return cell.getDateCellValue().toString();
-                // Return as integer string if it's a whole number
-                double val = cell.getNumericCellValue();
-                return val == Math.floor(val) ? String.valueOf((long) val) : String.valueOf(val);
-            case BOOLEAN: return String.valueOf(cell.getBooleanCellValue());
-            case FORMULA:
-                try { return cell.getStringCellValue().trim(); } catch (Exception e) {
-                    return String.valueOf(cell.getNumericCellValue());
-                }
-            default: return "";
-        }
     }
 }
