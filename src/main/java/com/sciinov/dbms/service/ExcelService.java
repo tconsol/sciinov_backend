@@ -252,7 +252,8 @@ public class ExcelService {
                     flushBatch(toInsert, insertedIds);
                     batchCount++;
                     toInsert.clear(); // ← KEY: Clear list to free memory
-                    fileEmails.clear(); // ← Also clear file emails for current batch
+                    // NOTE: DO NOT clear fileEmails here - we need to track ALL emails in the file
+                    // to prevent duplicates from being added across batches
                 }
             }
 
@@ -312,19 +313,82 @@ public class ExcelService {
     }
 
     /**
-     * Flush a batch of records to MongoDB.
-     * Insert and track IDs for potential rollback.
+     * Flush a batch of records to MongoDB with robust duplicate detection.
+     * Also handles partial failures gracefully.
      */
     private void flushBatch(List<DashboardData> batch, List<String> insertedIds) {
+        if (batch == null || batch.isEmpty()) {
+            return;
+        }
+
+        // ── PRE-CHECK: Detect duplicates within batch using case-insensitive comparison ──
+        Set<String> batchEmails = new HashSet<>();
+        List<DashboardData> dedupedBatch = new ArrayList<>();
+
+        for (DashboardData data : batch) {
+            String emailNorm = normalizeEmail(data.getEmail());
+            if (!batchEmails.contains(emailNorm)) {
+                batchEmails.add(emailNorm);
+                dedupedBatch.add(data);
+            } else {
+                logger.debug("[Batch Dedup] Duplicate within batch removed: {}", emailNorm);
+            }
+        }
+
+        if (dedupedBatch.isEmpty()) {
+            logger.info("[Upload] Batch flush skipped — all records were duplicates within batch");
+            return;
+        }
+
+        // ── Insert deduplicated batch ──
         try {
-            Collection<DashboardData> inserted = mongoTemplate.insertAll(batch);
-            inserted.forEach(doc -> {
-                if (doc.getId() != null) {
-                    insertedIds.add(doc.getId());
+            Collection<DashboardData> inserted = mongoTemplate.insertAll(dedupedBatch);
+            int insertedCount = (inserted != null) ? inserted.size() : 0;
+
+            // Track inserted IDs for rollback
+            if (inserted != null) {
+                inserted.forEach(doc -> {
+                    if (doc.getId() != null) {
+                        insertedIds.add(doc.getId());
+                    }
+                });
+            }
+
+            logger.info("[Upload] Batch flushed — {} records inserted, {} duplicates removed from batch",
+                        insertedCount, batch.size() - insertedCount);
+
+        } catch (org.springframework.dao.DuplicateKeyException dkEx) {
+            // ── Handle duplicate key errors gracefully ──
+            logger.warn("[Upload] Duplicate key detected in batch. Attempting single-record insertion for valid records...");
+
+            // Try to insert records one by one to identify which ones have duplicates
+            int successful = 0;
+            int duplicateErrors = 0;
+
+            for (DashboardData data : dedupedBatch) {
+                try {
+                    DashboardData inserted = mongoTemplate.insert(data);
+                    if (inserted != null && inserted.getId() != null) {
+                        insertedIds.add(inserted.getId());
+                        successful++;
+                    }
+                } catch (org.springframework.dao.DuplicateKeyException e) {
+                    duplicateErrors++;
+                    logger.debug("[Upload] Skipped duplicate email: {}", data.getEmail());
+                } catch (Exception e) {
+                    logger.error("[Upload] Error inserting record: {}", e.getMessage());
+                    throw new RuntimeException("Batch insert failed: " + e.getMessage(), e);
                 }
-            });
-            logger.info("[Upload] Batch flushed — {} records inserted", inserted.size());
+            }
+
+            logger.info("[Upload] Batch partial insert — {} successful, {} duplicates", successful, duplicateErrors);
+
+            if (successful == 0) {
+                throw new RuntimeException("Batch insert failed: All records were duplicates");
+            }
+
         } catch (Exception e) {
+            logger.error("[Upload] Batch insert failed with exception: {}", e.getMessage());
             throw new RuntimeException("Batch insert failed: " + e.getMessage(), e);
         }
     }

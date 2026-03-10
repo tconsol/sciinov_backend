@@ -12,9 +12,15 @@ import java.util.Optional;
 public interface ConferenceDocumentRepository extends MongoRepository<ConferenceDocument, String> {
 
     /**
-     * Find document by conference, year, and type slug
+     * Find document by conference, year, and type slug — returns first match (for single-doc lookups)
      */
     Optional<ConferenceDocument> findByConferenceIdAndYearAndDocumentTypeAndDeletedFalse(
+            String conferenceId, Integer year, String documentType);
+
+    /**
+     * Find ALL documents by conference, year, and type slug — supports multiple files per type/year
+     */
+    List<ConferenceDocument> findAllByConferenceIdAndYearAndDocumentTypeAndDeletedFalse(
             String conferenceId, Integer year, String documentType);
 
     /**

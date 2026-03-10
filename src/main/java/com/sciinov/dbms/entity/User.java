@@ -1,5 +1,6 @@
 package com.sciinov.dbms.entity;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -34,6 +35,7 @@ public class User {
     @Indexed(unique = true)
     private String userId;
 
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY) // Accept in request body, never return in response
     private String password;
 
     /** SUPER_ADMIN or ADMIN */

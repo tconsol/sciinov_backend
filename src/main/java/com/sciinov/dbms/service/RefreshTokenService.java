@@ -120,13 +120,14 @@ public class RefreshTokenService {
     }
 
     public void revokeAllTokensForUser(String userId) {
-        Optional<RefreshToken> refreshToken = refreshTokenRepository.findByUserId(userId);
-        if (refreshToken.isPresent()) {
-            RefreshToken rt = refreshToken.get();
+        List<RefreshToken> activeTokens = refreshTokenRepository.findAllByUserIdAndRevokedFalse(userId);
+        int revokedCount = 0;
+        for (RefreshToken rt : activeTokens) {
             rt.setRevoked(true);
             refreshTokenRepository.save(rt);
-            logger.info("All refresh tokens revoked for user: {}", userId);
+            revokedCount++;
         }
+        logger.info("All refresh tokens revoked for user: {} (count: {})", userId, revokedCount);
     }
 
     private String generateRandomToken() {

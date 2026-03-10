@@ -26,6 +26,9 @@ public class MongoConfig {
 
     private static final Logger logger = LoggerFactory.getLogger(MongoConfig.class);
 
+    @org.springframework.beans.factory.annotation.Value("${app.superadmin.default-password:#{null}}")
+    private String defaultSuperAdminPassword;
+
     @Bean
     CommandLineRunner initDatabase(UserRepository userRepository,
                                    PasswordEncoder passwordEncoder,
@@ -44,20 +47,23 @@ public class MongoConfig {
 
                 // ── Seed default super admin ──────────────────────────────
                 if (!userRepository.existsByRoleAndDeletedFalse(User.Role.SUPER_ADMIN)) {
+                    String adminPassword = (defaultSuperAdminPassword != null && !defaultSuperAdminPassword.isBlank())
+                            ? defaultSuperAdminPassword
+                            : java.util.UUID.randomUUID().toString();
                     User superAdmin = User.builder()
                             .firstName("Super")
                             .lastName("Admin")
                             .userId("superadmin")
                             .email("superadmin@example.com")
                             .phoneNumber("0000000000")
-                            .password(passwordEncoder.encode("admin123"))
+                            .password(passwordEncoder.encode(adminPassword))
                             .role(User.Role.SUPER_ADMIN)
                             .status(true)
                             .createdAt(LocalDateTime.now())
                             .updatedAt(LocalDateTime.now())
                             .build();
                     userRepository.save(superAdmin);
-                    System.out.println("✅ Default Super Admin created: superadmin / admin123");
+                    logger.info("✅ Default Super Admin created: superadmin (password set from SUPER_ADMIN_DEFAULT_PASSWORD env var)");
                 }
 
                 // ── Seed default document types ───────────────────────────

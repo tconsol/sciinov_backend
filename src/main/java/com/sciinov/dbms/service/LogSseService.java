@@ -115,43 +115,64 @@ public class LogSseService {
     // ── Internal helpers ──────────────────────────────────────────────
 
     private void pushToSuperAdmins(String eventName, Object data) {
-        if (superAdminEmitters.isEmpty()) return;
+        if (superAdminEmitters.isEmpty()) {
+            logger.trace("No super admin SSE subscribers");
+            return;
+        }
         List<SseEmitter> deadEmitters = new CopyOnWriteArrayList<>();
         for (SseEmitter emitter : superAdminEmitters) {
             if (!sendToEmitter(emitter, eventName, data)) {
                 deadEmitters.add(emitter);
             }
         }
-        superAdminEmitters.removeAll(deadEmitters);
+        if (!deadEmitters.isEmpty()) {
+            superAdminEmitters.removeAll(deadEmitters);
+            logger.debug("Removed {} dead super admin SSE emitters. Active: {}", deadEmitters.size(), superAdminEmitters.size());
+        }
     }
 
     private void pushToAdmin(String adminId, String eventName, Object data) {
         List<SseEmitter> emitters = adminEmitters.get(adminId);
-        if (emitters == null || emitters.isEmpty()) return;
+        if (emitters == null || emitters.isEmpty()) {
+            logger.trace("No SSE subscribers for admin: {}", adminId);
+            return;
+        }
         List<SseEmitter> deadEmitters = new CopyOnWriteArrayList<>();
         for (SseEmitter emitter : emitters) {
             if (!sendToEmitter(emitter, eventName, data)) {
                 deadEmitters.add(emitter);
             }
         }
-        emitters.removeAll(deadEmitters);
+        if (!deadEmitters.isEmpty()) {
+            emitters.removeAll(deadEmitters);
+            logger.debug("Removed {} dead SSE emitters for admin: {}. Active: {}", deadEmitters.size(), adminId, emitters.size());
+        }
     }
 
     /**
      * @return true if sent successfully, false if emitter is dead
+     * Gracefully handles disconnected clients without propagating errors
      */
     private boolean sendToEmitter(SseEmitter emitter, String eventName, Object data) {
         try {
             String json = objectMapper.writeValueAsString(data);
             emitter.send(SseEmitter.event()
                     .name(eventName)
-                    .data(json));
+                    .data(json)
+                    .reconnectTime(5000)); // Auto-reconnect after 5 seconds if connection drops
             return true;
         } catch (IOException e) {
-            logger.debug("SSE emitter dead, removing: {}", e.getMessage());
+            // Client disconnected or connection aborted - this is expected and not an error
+            // Just silently return false so the emitter can be removed
+            logger.debug("SSE client disconnected: {}", e.getClass().getSimpleName());
+            return false;
+        } catch (IllegalStateException e) {
+            // Emitter already closed
+            logger.debug("SSE emitter already closed");
             return false;
         } catch (Exception e) {
-            logger.warn("Error sending SSE event: {}", e.getMessage());
+            // Unexpected error
+            logger.warn("Unexpected error sending SSE event: {} - {}", e.getClass().getSimpleName(), e.getMessage());
             return false;
         }
     }

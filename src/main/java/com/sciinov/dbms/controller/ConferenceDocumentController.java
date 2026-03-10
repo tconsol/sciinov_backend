@@ -83,7 +83,7 @@ public class ConferenceDocumentController {
     @PostMapping("/upload")
     @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
     @Operation(summary = "Upload conference document",
-        description = "Upload Program, Book, or Positive Sheets. Supports multiple Excel formats (.xls, .xlsx, .xlsm) and other documents. If file already exists for this conference/year/type, it will be replaced.")
+        description = "Upload Program, Book, or Positive Sheets. Supports multiple Excel formats (.xls, .xlsx, .xlsm) and other documents. Multiple files for the same conference/year/type are allowed — existing files are never replaced.")
     public ResponseEntity<?> uploadDocument(
             @RequestParam String conferenceId,
             @RequestParam Integer year,
@@ -140,7 +140,7 @@ public class ConferenceDocumentController {
 
             return ResponseEntity.ok(Map.of(
                 "success", true,
-                "message", "Document uploaded successfully. If a previous version existed, it has been replaced.",
+                "message", "Document uploaded successfully.",
                 "data", new ConferenceDocumentResponse(doc)
             ));
 

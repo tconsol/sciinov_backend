@@ -83,26 +83,8 @@ public class ConferenceDocumentService {
             throw new RuntimeException("Document type '" + docType.getDisplayName() + "' is currently inactive.");
         }
 
-        // Check if document already exists for this conference/year/type — replace if so
-        Optional<ConferenceDocument> existingDoc =
-            conferenceDocumentRepository.findByConferenceIdAndYearAndDocumentTypeAndDeletedFalse(
-                conferenceId, year, documentTypeSlug);
-
-        if (existingDoc.isPresent()) {
-            ConferenceDocument oldDoc = existingDoc.get();
-            try {
-                String oldGcsKey = (oldDoc.getBlobName() != null && !oldDoc.getBlobName().isEmpty())
-                        ? oldDoc.getBlobName() : oldDoc.getFilePath();
-                if (oldGcsKey != null && !oldGcsKey.isEmpty()) {
-                    gcsService.deleteFile(oldGcsKey);
-                    logger.info("Deleted old file from GCS: {}", oldGcsKey);
-                }
-            } catch (Exception e) {
-                logger.warn("Failed to delete old file from GCS: {}", e.getMessage());
-            }
-            conferenceDocumentRepository.deleteById(oldDoc.getId());
-            logger.info("Hard-deleted old document from database - ID: {}", oldDoc.getId());
-        }
+        // Multiple files per conference/year/type are now allowed.
+        // Do NOT replace or delete existing documents — each upload is additive.
 
         // Upload to GCS
         String folderPath = generateFolderPath(conference.getTitle(), year, docType.getFolderName());
@@ -181,9 +163,9 @@ public class ConferenceDocumentService {
 
         if (conferenceId != null && !conferenceId.isEmpty()) {
             if (year != null && documentTypeSlug != null) {
-                conferenceDocumentRepository
-                    .findByConferenceIdAndYearAndDocumentTypeAndDeletedFalse(conferenceId, year, documentTypeSlug)
-                    .ifPresent(docs::add);
+                // Multiple documents per conference/year/type are now supported
+                docs.addAll(conferenceDocumentRepository
+                    .findAllByConferenceIdAndYearAndDocumentTypeAndDeletedFalse(conferenceId, year, documentTypeSlug));
             } else if (year != null) {
                 docs.addAll(conferenceDocumentRepository
                     .findByConferenceIdAndYearAndDeletedFalseOrderByDocumentTypeAsc(conferenceId, year));
