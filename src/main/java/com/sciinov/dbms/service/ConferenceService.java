@@ -4,6 +4,9 @@ import com.sciinov.dbms.entity.Conference;
 import com.sciinov.dbms.entity.DashboardMaster;
 import com.sciinov.dbms.repository.ConferenceRepository;
 import com.sciinov.dbms.repository.DashboardMasterRepository;
+import com.sciinov.dbms.repository.DashboardDataRepository;
+import com.sciinov.dbms.repository.ConferenceDocumentRepository;
+import com.sciinov.dbms.entity.DashboardData;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,6 +31,12 @@ public class ConferenceService {
 
     @Autowired
     private DashboardMasterRepository dashboardMasterRepository;
+
+    @Autowired
+    private DashboardDataRepository dashboardDataRepository;
+
+    @Autowired
+    private ConferenceDocumentRepository conferenceDocumentRepository;
 
     @Autowired
     private GoogleCloudStorageService gcsService;
@@ -270,5 +279,51 @@ public class ConferenceService {
         logger.info("Found {} dashboards for conference: {}", dashboards.size(), conferenceId);
 
         return dashboards;
+    }
+
+    /**
+     * Get total count of dashboard data records for a specific conference
+     */
+    public long getTotalDashboardDataRecordsForConference(String conferenceId) {
+        return dashboardDataRepository.countByConferenceIdAndDeletedFalse(conferenceId);
+    }
+
+    /**
+     * Get total count of conference documents for a specific conference
+     */
+    public long getTotalConferenceDocumentsForConference(String conferenceId) {
+        return conferenceDocumentRepository.countByConferenceIdAndDeletedFalse(conferenceId);
+    }
+
+    /**
+     * Get count of each document type for a specific conference
+     */
+    public Map<String, Long> getDocumentTypeCountForConference(String conferenceId) {
+        // Validate conference exists
+        conferenceRepository.findByIdAndDeletedFalse(conferenceId)
+                .orElseThrow(() -> new RuntimeException("Conference not found"));
+
+        List<String> documentTypes = List.of("program", "book", "positive_sheets");
+        return documentTypes.stream()
+                .collect(Collectors.toMap(
+                        type -> type,
+                        type -> conferenceDocumentRepository.countByConferenceIdAndDocumentTypeAndDeletedFalse(conferenceId, type)
+                ));
+    }
+
+    /**
+     * Get dashboard data counts for each dashboard in a conference
+     */
+    public Map<String, Long> getDashboardDataCountsForConference(String conferenceId) {
+        // Get all dashboards for this conference
+        List<DashboardMaster> dashboards = getDashboardsForConference(conferenceId);
+
+        Map<String, Long> dashboardDataCounts = new java.util.HashMap<>();
+        for (DashboardMaster dashboard : dashboards) {
+            long count = dashboardDataRepository.countByConferenceIdAndDashboardMasterIdAndDeletedFalse(
+                    conferenceId, dashboard.getId());
+            dashboardDataCounts.put(dashboard.getName(), count);
+        }
+        return dashboardDataCounts;
     }
 }

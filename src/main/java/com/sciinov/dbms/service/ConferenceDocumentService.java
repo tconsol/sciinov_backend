@@ -1,5 +1,7 @@
 package com.sciinov.dbms.service;
 
+import com.sciinov.dbms.dto.ConferenceDocumentUpdateRequest;
+import com.sciinov.dbms.dto.ConferenceDocumentFilterRequest;
 import com.sciinov.dbms.entity.AdminActivityLog;
 import com.sciinov.dbms.entity.Conference;
 import com.sciinov.dbms.entity.ConferenceDocument;
@@ -560,5 +562,118 @@ public class ConferenceDocumentService {
         } catch (Exception e) {
             logger.error("Failed to record upload stats: {}", e.getMessage());
         }
+    }
+
+    /**
+     * Get all conference documents across all conferences
+     */
+    public List<ConferenceDocument> getAllConferenceDocuments() {
+        return conferenceDocumentRepository.findByDeletedFalseOrderByUpdatedAtDesc();
+    }
+
+    /**
+     * Get total count of all conference documents
+     */
+    public long getTotalConferenceDocumentCount() {
+        List<ConferenceDocument> all = conferenceDocumentRepository.findByDeletedFalse();
+        return all.size();
+    }
+
+    /**
+     * Update conference document metadata
+     */
+    public ConferenceDocument updateDocument(String documentId, ConferenceDocumentUpdateRequest request) {
+        ConferenceDocument doc = conferenceDocumentRepository.findById(documentId)
+                .orElseThrow(() -> new RuntimeException("Document not found: " + documentId));
+
+        if (request.getYear() != null) {
+            doc.setYear(request.getYear());
+        }
+        if (request.getFileName() != null && !request.getFileName().isEmpty()) {
+            doc.setFileName(request.getFileName());
+        }
+
+        doc.setUpdatedAt(LocalDateTime.now());
+        return conferenceDocumentRepository.save(doc);
+    }
+
+    /**
+     * Soft-delete document (mark as deleted, don't remove from DB)
+     */
+    public ConferenceDocument softDeleteDocument(String documentId, String userId, String userName, String ipAddress) {
+        ConferenceDocument doc = conferenceDocumentRepository.findById(documentId)
+                .orElseThrow(() -> new RuntimeException("Document not found: " + documentId));
+
+        doc.setDeleted(true);
+        doc.setUpdatedAt(LocalDateTime.now());
+        ConferenceDocument deleted = conferenceDocumentRepository.save(doc);
+
+        logActivity(userId, userName, doc.getConferenceId(), null,
+                AdminActivityLog.ActionType.DELETE, "Soft-deleted document: " + doc.getFileName(), ipAddress);
+
+        return deleted;
+    }
+
+    /**
+     * Hard-delete document (remove from DB and GCS)
+     */
+    public ConferenceDocument hardDeleteDocument(String documentId, String userId, String userName, String ipAddress) {
+        ConferenceDocument doc = conferenceDocumentRepository.findById(documentId)
+                .orElseThrow(() -> new RuntimeException("Document not found: " + documentId));
+
+        // Delete from GCS
+        try {
+            String blobName = (doc.getBlobName() != null && !doc.getBlobName().isEmpty())
+                    ? doc.getBlobName() : doc.getFilePath();
+            if (blobName != null && !blobName.isEmpty()) {
+                gcsService.deleteFile(blobName);
+                logger.info("Deleted GCS file: {}", blobName);
+            }
+        } catch (Exception e) {
+            logger.warn("Failed to delete GCS file: {}", e.getMessage());
+        }
+
+        // Delete from DB
+        conferenceDocumentRepository.deleteById(documentId);
+
+        logActivity(userId, userName, doc.getConferenceId(), null,
+                AdminActivityLog.ActionType.DELETE, "Hard-deleted document: " + doc.getFileName(), ipAddress);
+
+        return doc;
+    }
+
+    /**
+     * Search documents with filter request
+     */
+    public List<ConferenceDocument> searchDocuments(ConferenceDocumentFilterRequest filterRequest) {
+        List<ConferenceDocument> docs = conferenceDocumentRepository.findByDeletedFalse();
+
+        if (filterRequest.getConferenceId() != null && !filterRequest.getConferenceId().isEmpty()) {
+            docs = docs.stream()
+                    .filter(d -> d.getConferenceId().equals(filterRequest.getConferenceId()))
+                    .collect(Collectors.toList());
+        }
+
+        if (filterRequest.getConferenceName() != null && !filterRequest.getConferenceName().isEmpty()) {
+            String searchName = filterRequest.getConferenceName().toLowerCase();
+            docs = docs.stream()
+                    .filter(d -> d.getConferenceName().toLowerCase().contains(searchName))
+                    .collect(Collectors.toList());
+        }
+
+        if (filterRequest.getYear() != null) {
+            docs = docs.stream()
+                    .filter(d -> d.getYear().equals(filterRequest.getYear()))
+                    .collect(Collectors.toList());
+        }
+
+        if (filterRequest.getDocumentType() != null && !filterRequest.getDocumentType().isEmpty()) {
+            String typeSlug = filterRequest.getDocumentType().trim().toLowerCase().replace(' ', '_').replace('-', '_');
+            docs = docs.stream()
+                    .filter(d -> d.getDocumentType().equalsIgnoreCase(typeSlug))
+                    .collect(Collectors.toList());
+        }
+
+        return docs;
     }
 }

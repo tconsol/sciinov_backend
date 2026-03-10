@@ -20,6 +20,9 @@ public class ConferenceDocumentUpdateRequest {
     /** Optional: Update the document type (slug or ID) */
     private String documentType;
 
+    /** Optional: Update the file name */
+    private String fileName;
+
     /** Optional: Add notes about the update */
     private String notes;
 }

@@ -71,6 +71,21 @@ public interface ConferenceDocumentRepository extends MongoRepository<Conference
     long countByYearAndDeletedFalse(Integer year);
 
     /**
+     * Count documents by conference and type slug
+     */
+    long countByConferenceIdAndDocumentTypeAndDeletedFalse(String conferenceId, String documentType);
+
+    /**
+     * Find all non-deleted documents across all conferences, ordered by updated at desc
+     */
+    List<ConferenceDocument> findByDeletedFalseOrderByUpdatedAtDesc();
+
+    /**
+     * Find all documents (deleted and non-deleted)
+     */
+    List<ConferenceDocument> findByDeletedFalse();
+
+    /**
      * Find all documents for a list of conferenceIds
      */
     List<ConferenceDocument> findByConferenceIdInAndDeletedFalseOrderByYearDescUpdatedAtDesc(List<String> conferenceIds);

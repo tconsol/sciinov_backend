@@ -39,4 +39,9 @@ public interface DashboardDataRepository extends MongoRepository<DashboardData, 
     List<DashboardData> findByConferenceAndSerialRangeAndDateRange(
             String conferenceId, String dashboardMasterId, Long fromSerialNo, Long toSerialNo,
             LocalDateTime startDate, LocalDateTime endDate, Sort sort);
+
+    // Count methods for statistics
+    long countByConferenceIdAndDeletedFalse(String conferenceId);
+
+    long countByConferenceIdAndDashboardMasterIdAndDeletedFalse(String conferenceId, String dashboardMasterId);
 }
