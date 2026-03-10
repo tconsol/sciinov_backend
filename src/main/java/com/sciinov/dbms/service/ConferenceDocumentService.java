@@ -259,6 +259,96 @@ public class ConferenceDocumentService {
         conferenceDocumentLogService.log(userId, userName, ipAddress, ConferenceDocumentLog.ActionType.DELETE, doc);
     }
 
+    /**
+     * Update document metadata (year and/or documentType)
+     * @param documentId ID of the document to update
+     * @param newYear Optional new year for the document
+     * @param newDocumentTypeSlug Optional new document type slug
+     * @param userId ID of the user performing the update
+     * @param userName Name of the user performing the update
+     * @param ipAddress IP address of the request
+     * @return Updated ConferenceDocument
+     */
+    public ConferenceDocument updateDocument(
+            String documentId,
+            Integer newYear,
+            String newDocumentTypeSlug,
+            String userId,
+            String userName,
+            String ipAddress) {
+
+        ConferenceDocument doc = conferenceDocumentRepository.findById(documentId)
+                .orElseThrow(() -> new RuntimeException("Document not found: " + documentId));
+
+        if (doc.isDeleted()) {
+            throw new RuntimeException("Cannot update a deleted document: " + documentId);
+        }
+
+        String conferenceId = doc.getConferenceId();
+        boolean updated = false;
+
+        // Update year if provided
+        if (newYear != null) {
+            int currentYear = java.time.Year.now().getValue();
+            if (newYear < 2000 || newYear > currentYear + 10) {
+                throw new RuntimeException("Year must be between 2000 and " + (currentYear + 10));
+            }
+            if (!newYear.equals(doc.getYear())) {
+                doc.setYear(newYear);
+                updated = true;
+            }
+        }
+
+        // Update document type if provided
+        if (newDocumentTypeSlug != null && !newDocumentTypeSlug.isEmpty()) {
+            String typeSlug = newDocumentTypeSlug.trim();
+
+            // Resolve if it's a MongoDB ObjectId
+            if (isMongoObjectId(typeSlug)) {
+                Optional<DocumentTypeEntity> docTypeOpt = documentTypeService.findById(typeSlug);
+                if (docTypeOpt.isPresent()) {
+                    typeSlug = docTypeOpt.get().getSlug();
+                    logger.info("Resolved document type ID {} to slug: {}", newDocumentTypeSlug, typeSlug);
+                } else {
+                    throw new RuntimeException(
+                        "Invalid document type ID: '" + newDocumentTypeSlug + "'. Use GET /api/document-types/active to see available types.");
+                }
+            } else {
+                typeSlug = typeSlug.toLowerCase().replace(' ', '_').replace('-', '_');
+            }
+
+            // Validate that the new document type exists and is active
+            final String finalTypeSlug = typeSlug;  // Make it effectively final for lambda
+            DocumentTypeEntity newDocType = documentTypeService.findBySlug(finalTypeSlug)
+                    .orElseThrow(() -> new RuntimeException(
+                            "Invalid document type: '" + finalTypeSlug + "'. Use GET /api/document-types/active to see available types."));
+            if (!newDocType.isActive()) {
+                throw new RuntimeException("Document type '" + newDocType.getDisplayName() + "' is currently inactive.");
+            }
+
+            if (!finalTypeSlug.equals(doc.getDocumentType())) {
+                doc.setDocumentType(finalTypeSlug);
+                doc.setDocumentTypeDisplayName(newDocType.getDisplayName());
+                updated = true;
+            }
+        }
+
+        if (!updated) {
+            throw new RuntimeException("No changes provided for update");
+        }
+
+        doc.setUpdatedAt(LocalDateTime.now());
+        ConferenceDocument saved = conferenceDocumentRepository.save(doc);
+
+        logger.info("Updated conference document - ID: {}, Conference: {}, Year: {}, Type: {}, Updated by: {}",
+            documentId, conferenceId, doc.getYear(), doc.getDocumentType(), userName);
+
+        // Log the update action
+        conferenceDocumentLogService.log(userId, userName, ipAddress, ConferenceDocumentLog.ActionType.UPDATE, saved);
+
+        return saved;
+    }
+
     /** Get available years for a conference */
     public List<Integer> getAvailableYears(String conferenceId) {
         return conferenceDocumentRepository
@@ -418,6 +508,19 @@ public class ConferenceDocumentService {
     }
 
     // ─── Private helpers ─────────────────────────────────────────────
+
+    /**
+     * Check if a string is a valid MongoDB ObjectId (24 hexadecimal characters).
+     * MongoDB ObjectIds are exactly 24 hex characters long (0-9, a-f, A-F).
+     */
+    private boolean isMongoObjectId(String str) {
+        if (str == null || str.length() != 24) {
+            return false;
+        }
+        // Check if all characters are valid hexadecimal (0-9, a-f, A-F)
+        return str.matches("[0-9a-fA-F]{24}");
+    }
+
 
     private String generateFolderPath(String conferenceName, Integer year, String folderName) {
         return String.format("conferences/%s/%d/%s/", sanitizePath(conferenceName), year, folderName);

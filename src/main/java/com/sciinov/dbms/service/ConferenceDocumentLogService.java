@@ -113,6 +113,7 @@ public class ConferenceDocumentLogService {
             case UPLOAD:   return "Uploaded " + typeName + " '" + fileName + "' (Year: " + year + ") for " + conf;
             case DOWNLOAD: return "Downloaded " + typeName + " '" + fileName + "' (Year: " + year + ") from " + conf;
             case DELETE:   return "Deleted " + typeName + " '" + fileName + "' (Year: " + year + ") from " + conf;
+            case UPDATE:   return "Updated " + typeName + " '" + fileName + "' (Year: " + year + ") for " + conf;
             default:       return typeName + " '" + fileName + "' — " + actionType.name();
         }
     }

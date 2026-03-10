@@ -1,6 +1,7 @@
 package com.sciinov.dbms.controller;
 
 import com.sciinov.dbms.dto.ConferenceDocumentResponse;
+import com.sciinov.dbms.dto.ConferenceDocumentUpdateRequest;
 import com.sciinov.dbms.entity.ConferenceDocument;
 import com.sciinov.dbms.entity.ConferenceDocumentLog;
 import com.sciinov.dbms.entity.DocumentTypeEntity;
@@ -57,11 +58,16 @@ public class ConferenceDocumentController {
 
     /**
      * Validate that an ADMIN is assigned to the given conferenceId.
-     * SUPER_ADMIN is always allowed.
+     * SUPER_ADMIN is always allowed (no check needed).
      */
     private void validateConferenceAccess(String conferenceId) {
         UserDetailsImpl ud = getCurrentUser();
         User user = ud.getUser();
+        // SUPER_ADMIN has access to all conferences
+        if (user.getRole() == User.Role.SUPER_ADMIN) {
+            return;
+        }
+        // ADMIN must be assigned to the conference
         if (user.getRole() == User.Role.ADMIN) {
             if (user.getConferenceIds() == null || !user.getConferenceIds().contains(conferenceId)) {
                 throw new AccessDeniedException("Access Denied: You are not assigned to conference " + conferenceId);
@@ -317,6 +323,46 @@ public class ConferenceDocumentController {
     }
 
     // ─────────────────────────────────────────────────────────────────
+    // GET all documents with filters (SUPER_ADMIN only)
+    // GET /api/conference-documents/admin/all
+    // SUPER_ADMIN can filter across all conferences
+    // ─────────────────────────────────────────────────────────────────
+    @GetMapping("/admin/all")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    @Operation(summary = "Get all conference documents (SUPER_ADMIN only)",
+        description = "SUPER_ADMIN can retrieve all conference documents across all conferences with optional filters for year, document type, and conference name.")
+    public ResponseEntity<?> getAllDocumentsForAdmin(
+            @RequestParam(required = false) String conferenceName,
+            @RequestParam(required = false) Integer year,
+            @RequestParam(required = false) String documentType,
+            @RequestParam(defaultValue = "0") int pageNumber,
+            @RequestParam(defaultValue = "10") int pageSize) {
+        try {
+            String typeSlug = (documentType != null && !documentType.isEmpty())
+                ? documentType.trim().toLowerCase().replace(' ', '_').replace('-', '_') : null;
+
+            // Pass null for conferenceId to get all documents across all conferences
+            Page<ConferenceDocument> page = conferenceDocumentService.getDocumentsWithFilter(
+                null, conferenceName, year, typeSlug, pageNumber, pageSize);
+            List<ConferenceDocumentResponse> responses = page.getContent().stream()
+                .map(ConferenceDocumentResponse::new).toList();
+
+            return ResponseEntity.ok(Map.of(
+                "success", true,
+                "pageNumber", pageNumber,
+                "pageSize", pageSize,
+                "totalElements", page.getTotalElements(),
+                "totalPages", page.getTotalPages(),
+                "data", responses
+            ));
+        } catch (Exception e) {
+            logger.error("Error fetching all documents: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Map.of("success", false, "message", "Failed to fetch documents: " + e.getMessage()));
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
     // GET document by ID
     // GET /api/conference-documents/{id}
     // ─────────────────────────────────────────────────────────────────
@@ -471,6 +517,64 @@ public class ConferenceDocumentController {
             logger.error("Error deleting document {}: {}", id, e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(Map.of("success", false, "message", "Failed to delete document: " + e.getMessage()));
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // UPDATE document metadata (year and/or documentType)
+    // PUT /api/conference-documents/{id}
+    // SUPER_ADMIN only
+    // ─────────────────────────────────────────────────────────────────
+    @PutMapping("/{id}")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    @Operation(summary = "Update document metadata",
+        description = "SUPER_ADMIN only. Update document year and/or documentType. At least one field must be provided.")
+    public ResponseEntity<?> updateDocument(
+            @PathVariable String id,
+            @RequestBody ConferenceDocumentUpdateRequest request,
+            @RequestHeader(value = "X-Forwarded-For", required = false) String xForwardedFor,
+            HttpServletRequest httpRequest) {
+        try {
+            Optional<ConferenceDocument> docOpt = conferenceDocumentService.getDocumentById(id);
+            if (docOpt.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("success", false, "message", "Document not found"));
+            }
+
+            UserDetailsImpl ud = getCurrentUser();
+            String userId   = ud.getId();
+            String userName = ud.getUser().getFirstName() + " " + ud.getUser().getLastName();
+            String ipAddress = getClientIpAddress(xForwardedFor, httpRequest);
+
+            logger.info("Updating document - ID: {}, User: {}, Year: {}, DocumentType: {}",
+                id, userName, request.getYear(), request.getDocumentType());
+
+            // Call service to update document with proper validation
+            ConferenceDocument updated = conferenceDocumentService.updateDocument(
+                id,
+                request.getYear(),
+                request.getDocumentType(),
+                userId,
+                userName,
+                ipAddress);
+
+            logger.info("Document updated successfully - ID: {}, User: {}", id, userName);
+
+            return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "Document updated successfully",
+                "data", new ConferenceDocumentResponse(updated)
+            ));
+
+        } catch (AccessDeniedException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("success", false, "message", e.getMessage()));
+        } catch (RuntimeException e) {
+            logger.error("Error updating document {}: {}", id, e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("success", false, "message", e.getMessage()));
+        } catch (Exception e) {
+            logger.error("Unexpected error updating document {}: {}", id, e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Map.of("success", false, "message", "Unexpected error: " + e.getMessage()));
         }
     }
 
