@@ -45,6 +45,9 @@ public class DashboardData {
     // NOTE: email setter has special normalization logic — do NOT replace with plain Lombok setter
     private String email;
 
+    @Indexed
+    private String emailExtension;  // Domain/TLD part (e.g., "gmail.com")
+
     private boolean status;
 
     @CreatedDate

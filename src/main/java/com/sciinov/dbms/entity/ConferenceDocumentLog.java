@@ -61,6 +61,8 @@ public class ConferenceDocumentLog {
         DOWNLOAD,
         /** Admin deleted a document */
         DELETE,
+        /** Admin updated document metadata */
+        UPDATE,
         /** Admin viewed / listed documents */
         VIEW
     }

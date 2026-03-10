@@ -210,7 +210,15 @@ public class WebSecurityConfig {
             parsedOrigins = Arrays.asList("http://localhost:5173", "https://sciinovdbms.com");
         }
 
-        configuration.setAllowedOriginPatterns(parsedOrigins);
+        logger.info("🔒 CORS Configuration Applied:");
+        logger.info("   ✅ Allowed Origins: {}", parsedOrigins);
+        logger.info("   ✅ Allowed Methods: GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD");
+        logger.info("   ✅ Allowed Headers: * (All headers)");
+        logger.info("   ✅ Allow Credentials: true");
+        logger.info("   ✅ Preflight Cache: 24 hours");
+
+        // Set origins using direct list
+        configuration.setAllowedOrigins(parsedOrigins);
 
         configuration.setAllowedMethods(Arrays.asList(
                 "GET",
@@ -222,23 +230,29 @@ public class WebSecurityConfig {
                 "HEAD"
         ));
 
+        // Allow all headers including custom ones
         configuration.setAllowedHeaders(List.of("*"));
 
+        // Expose headers that frontend might need to read
         configuration.setExposedHeaders(Arrays.asList(
                 "Authorization",
                 "Content-Disposition",
                 "X-Total-Count",
                 "X-Page-Number",
-                "X-Correlation-ID"
+                "X-Correlation-ID",
+                "Content-Type",
+                "X-Requested-With"
         ));
 
         configuration.setAllowCredentials(true);
 
+        // Preflight cache for 24 hours (86400 seconds)
         configuration.setMaxAge(86400L);
 
         UrlBasedCorsConfigurationSource source =
                 new UrlBasedCorsConfigurationSource();
 
+        // Register CORS for all paths
         source.registerCorsConfiguration("/**", configuration);
 
         return source;

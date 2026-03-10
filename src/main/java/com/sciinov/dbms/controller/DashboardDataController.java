@@ -29,6 +29,16 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Dashboard Data Management Controller
+ *
+ * Handles:
+ * - Excel file uploads with deduplication and normalization
+ * - Dashboard data retrieval and filtering
+ * - Data export functionality
+ *
+ * CORS: Handled globally via WebSecurityConfig (supports https://sciinovdbms.com and http://localhost:5173)
+ */
 @RestController
 @RequestMapping("/api/dashboard-data")
 public class DashboardDataController {
@@ -425,17 +435,6 @@ public class DashboardDataController {
         return ResponseEntity.ok(response);
     }
 
-    /**
-     * Check upload progress in real-time
-     * GET /api/dashboard-data/upload/progress/{uploadId}
-     */
-    @GetMapping("/upload/progress/{uploadId}")
-    @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<Map<String, Object>> getUploadProgress(@PathVariable String uploadId) {
-        logger.info("GET /api/dashboard-data/upload/progress - uploadId: {}", uploadId);
-        Map<String, Object> progress = excelService.getUploadProgress(uploadId);
-        return ResponseEntity.ok(progress);
-    }
 
     private void validateAccess(String conferenceId) {
         UserDetailsImpl userDetails = (UserDetailsImpl) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
