@@ -10,5 +10,7 @@ import java.util.Optional;
 @Repository
 public interface ConferenceRepository extends MongoRepository<Conference, String> {
     List<Conference> findByDeletedFalse();
+    List<Conference> findByDeletedFalseOrderByCreatedAtDesc();
+    List<Conference> findByDeletedFalseOrderByUpdatedAtDesc();
     Optional<Conference> findByIdAndDeletedFalse(String id);
 }

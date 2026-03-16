@@ -4,6 +4,7 @@ import com.sciinov.dbms.entity.Conference;
 import com.sciinov.dbms.entity.DashboardMaster;
 import com.sciinov.dbms.repository.ConferenceRepository;
 import com.sciinov.dbms.repository.DashboardMasterRepository;
+
 import com.sciinov.dbms.repository.DashboardDataRepository;
 import com.sciinov.dbms.repository.ConferenceDocumentRepository;
 import com.sciinov.dbms.entity.DashboardData;
@@ -42,7 +43,7 @@ public class ConferenceService {
     private GoogleCloudStorageService gcsService;
 
     public List<Conference> getAllConferences() {
-        return conferenceRepository.findByDeletedFalse();
+        return conferenceRepository.findByDeletedFalseOrderByUpdatedAtDesc();
     }
 
     public Optional<Conference> getConferenceById(String id) {

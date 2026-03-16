@@ -129,9 +129,9 @@ public class DashboardDataController {
         validateAccess(conferenceId);
 
         int cappedSize = Math.min(size, 1000);
-        Pageable pageable = PageRequest.of(page, cappedSize, Sort.by(Sort.Direction.ASC, "serialNo"));
+        Pageable pageable = PageRequest.of(page, cappedSize, Sort.by(Sort.Direction.DESC, "serialNo"));
 
-        // Single DB call — fetch page
+        // Single DB call — fetch page with latest records first
         List<DashboardData> data = dashboardDataRepository
                 .findByConferenceIdAndDashboardMasterIdAndSerialNoBetweenAndDeletedFalse(
                         conferenceId, dashboardMasterId, fromSerialNo, toSerialNo, pageable);

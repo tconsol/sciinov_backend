@@ -10,5 +10,7 @@ import java.util.Optional;
 @Repository
 public interface DashboardMasterRepository extends MongoRepository<DashboardMaster, String> {
     List<DashboardMaster> findByDeletedFalse();
+    List<DashboardMaster> findByDeletedFalseOrderByCreatedAtDesc();
+    List<DashboardMaster> findByDeletedFalseOrderByUpdatedAtDesc();
     Optional<DashboardMaster> findByIdAndDeletedFalse(String id);
 }

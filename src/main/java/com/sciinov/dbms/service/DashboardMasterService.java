@@ -15,7 +15,7 @@ public class DashboardMasterService {
     private DashboardMasterRepository dashboardMasterRepository;
 
     public List<DashboardMaster> getAllDashboardMasters() {
-        return dashboardMasterRepository.findByDeletedFalse();
+        return dashboardMasterRepository.findByDeletedFalseOrderByUpdatedAtDesc();
     }
 
     public Optional<DashboardMaster> getDashboardMasterById(String id) {

@@ -120,22 +120,24 @@ public class ExportService {
 
     /**
      * Get filtered data based on multiple criteria using dynamic query building.
-     * NOTE: No sort to avoid MongoDB 32MB in-memory sort limit on large collections.
+     * Sorted by serialNo DESC (latest records first) to show newest uploads at the top.
      */
     public List<DashboardData> getFilteredData(ExportFilterRequest filterRequest) {
         Query query = buildFilterQuery(filterRequest);
-        // No sort — avoids exceeding MongoDB's 32MB in-memory sort limit
+        // Sort by serialNo DESC to show latest uploads first
+        query.with(org.springframework.data.domain.Sort.by(
+                org.springframework.data.domain.Sort.Direction.DESC, "serialNo"));
         return mongoTemplate.find(query, DashboardData.class);
     }
 
     /**
      * DB-level pagination — skip/limit pushed to MongoDB, never load all into memory.
-     * Replaces the old pattern of: load all → subList in Java.
+     * Sorted by serialNo DESC to show latest uploads first.
      */
     public List<DashboardData> getFilteredDataPaged(ExportFilterRequest filterRequest, int page, int size) {
         Query query = buildFilterQuery(filterRequest);
         query.with(org.springframework.data.domain.Sort.by(
-                org.springframework.data.domain.Sort.Direction.ASC, "serialNo"));
+                org.springframework.data.domain.Sort.Direction.DESC, "serialNo"));
         query.skip((long) page * size).limit(size);
         return mongoTemplate.find(query, DashboardData.class);
     }
