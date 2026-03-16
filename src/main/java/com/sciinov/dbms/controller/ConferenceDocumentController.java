@@ -280,6 +280,107 @@ public class ConferenceDocumentController {
     }
 
     // ─────────────────────────────────────────────────────────────────
+    // GET document by ID
+    // GET /api/conference-documents/{documentId}
+    // ─────────────────────────────────────────────────────────────────
+    @GetMapping("/{documentId}")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "Get document by ID")
+    public ResponseEntity<?> getDocumentById(
+            @PathVariable String documentId,
+            @RequestHeader(value = "X-Forwarded-For", required = false) String xForwardedFor,
+            HttpServletRequest request) {
+        try {
+            Optional<ConferenceDocument> docOpt = conferenceDocumentService.getDocumentById(documentId);
+            if (docOpt.isEmpty()) {
+                logger.warn("Document not found: {}", documentId);
+                return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("success", false, "message", "Document not found"));
+            }
+
+            ConferenceDocument doc = docOpt.get();
+            validateConferenceAccess(doc.getConferenceId());
+
+            ConferenceDocumentResponse response = new ConferenceDocumentResponse(doc);
+            logger.info("Retrieved document - ID: {}, Name: {}", documentId, doc.getFileName());
+
+            return ResponseEntity.ok(Map.of(
+                "success", true,
+                "data", response
+            ));
+        } catch (AccessDeniedException e) {
+            logger.warn("Access denied for document: {} - {}", documentId, e.getMessage());
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(Map.of("success", false, "message", e.getMessage()));
+        } catch (Exception e) {
+            logger.error("Error retrieving document {}: {}", documentId, e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Map.of("success", false, "message", "Failed to retrieve document: " + e.getMessage()));
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // DOWNLOAD document file
+    // GET /api/conference-documents/{documentId}/download
+    // ─────────────────────────────────────────────────────────────────
+    @GetMapping("/{documentId}/download")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
+    @Operation(summary = "Download document file")
+    public ResponseEntity<?> downloadDocument(
+            @PathVariable String documentId,
+            @RequestHeader(value = "X-Forwarded-For", required = false) String xForwardedFor,
+            HttpServletRequest request) {
+        try {
+            Optional<ConferenceDocument> docOpt = conferenceDocumentService.getDocumentById(documentId);
+            if (docOpt.isEmpty()) {
+                logger.warn("Document not found for download: {}", documentId);
+                return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("success", false, "message", "Document not found"));
+            }
+
+            ConferenceDocument doc = docOpt.get();
+            validateConferenceAccess(doc.getConferenceId());
+
+            UserDetailsImpl ud = getCurrentUser();
+            String userId = ud.getId();
+            String userName = ud.getUser().getFirstName() + " " + ud.getUser().getLastName();
+            String ipAddress = getClientIpAddress(xForwardedFor, request);
+
+            // Download file and log activity
+            byte[] fileContent = conferenceDocumentService.downloadDocument(documentId, userId, userName, ipAddress);
+
+            if (fileContent == null || fileContent.length == 0) {
+                logger.error("File is empty or corrupted: {}", documentId);
+                return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("success", false, "message", "File is empty or corrupted"));
+            }
+
+            String contentType = getContentType(doc.getFileName());
+            String sanitizedFileName = sanitizeFileName(doc.getFileName());
+
+            logger.info("Downloaded document - ID: {}, Name: {}, Size: {} bytes, User: {}",
+                documentId, doc.getFileName(), fileContent.length, userName);
+
+            return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_TYPE, contentType)
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + sanitizedFileName + "\"")
+                .header(HttpHeaders.CONTENT_LENGTH, String.valueOf(fileContent.length))
+                .header(HttpHeaders.CACHE_CONTROL, "no-cache, no-store, must-revalidate")
+                .header(HttpHeaders.PRAGMA, "no-cache")
+                .header(HttpHeaders.EXPIRES, "0")
+                .body(fileContent);
+        } catch (AccessDeniedException e) {
+            logger.warn("Access denied for document download: {} - {}", documentId, e.getMessage());
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(Map.of("success", false, "message", e.getMessage()));
+        } catch (Exception e) {
+            logger.error("Error downloading document {}: {}", documentId, e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Map.of("success", false, "message", "Failed to download document: " + e.getMessage()));
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
     // SEARCH with filters
     // POST /api/conference-documents/search
     // ─────────────────────────────────────────────────────────────────

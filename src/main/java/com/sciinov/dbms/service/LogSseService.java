@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -11,6 +13,7 @@ import java.io.IOException;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Executor;
 import java.util.List;
 
 /**
@@ -27,6 +30,7 @@ public class LogSseService {
     private static final long SSE_TIMEOUT = 30 * 60 * 1000L; // 30 minutes
 
     private final ObjectMapper objectMapper;
+    private final Executor ssePushExecutor;
 
     // SUPER_ADMIN emitters — all connected super-admin clients
     private final List<SseEmitter> superAdminEmitters = new CopyOnWriteArrayList<>();
@@ -34,10 +38,12 @@ public class LogSseService {
     // ADMIN emitters — keyed by adminId
     private final Map<String, List<SseEmitter>> adminEmitters = new ConcurrentHashMap<>();
 
-    public LogSseService() {
+    @Autowired
+    public LogSseService(@Qualifier("ssePushExecutor") Executor ssePushExecutor) {
         this.objectMapper = new ObjectMapper();
         this.objectMapper.registerModule(new JavaTimeModule());
         this.objectMapper.disable(com.fasterxml.jackson.databind.SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        this.ssePushExecutor = ssePushExecutor;
     }
 
     // ── Subscribe ─────────────────────────────────────────────────────

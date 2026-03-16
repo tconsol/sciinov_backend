@@ -33,6 +33,24 @@ public class AsyncConfig {
     }
 
     /**
+     * Dedicated executor for SSE push operations.
+     * Keeps SSE broadcasts on a separate thread pool so they NEVER block
+     * the upload request thread or interfere with Tomcat response handling.
+     */
+    @Bean(name = "ssePushExecutor")
+    public Executor ssePushExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(4);
+        executor.setQueueCapacity(500);
+        executor.setThreadNamePrefix("sse-push-");
+        executor.setKeepAliveSeconds(30);
+        executor.setWaitForTasksToCompleteOnShutdown(false); // SSE pushes are fire-and-forget
+        executor.initialize();
+        return executor;
+    }
+
+    /**
      * Custom TaskDecorator that preserves SecurityContext across async task execution.
      * This ensures that when @Async methods run in thread pool, they retain
      * the authentication/authorization context from the original request thread.
