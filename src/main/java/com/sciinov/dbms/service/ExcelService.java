@@ -132,7 +132,8 @@ public class ExcelService {
         logger.info("[Upload] Existing emails loaded: {}", seenEmails.size());
 
         // ── STEP 2: Get next serial number ──
-        long nextSerial = getNextSerialNo(conferenceId, dashboardMasterId);
+        long startSerial = getNextSerialNo(conferenceId, dashboardMasterId);
+        long nextSerial = startSerial;
 
         // ── Variables to track processing ──
         List<DashboardData> toInsert = new ArrayList<>(5_000);
@@ -297,7 +298,7 @@ public class ExcelService {
 
         // ── STEP 5: Save stats + activity log ──
         saveStats(admin, conferenceId, dashboardMasterId, fileName, totalRecords, newRecords, duplicates);
-        logUploadActivity(admin, conferenceId, dashboardMasterId, fileName, newRecords, duplicates);
+        logUploadActivity(admin, conferenceId, dashboardMasterId, fileName, newRecords, duplicates, startSerial);
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("status", "success");
@@ -576,7 +577,7 @@ public class ExcelService {
     }
 
     private void logUploadActivity(User admin, String conferenceId, String dashboardMasterId,
-                                   String fileName, int added, int duplicates) {
+                                   String fileName, int added, int duplicates, long startSerial) {
         AdminActivityLog log = new AdminActivityLog();
         log.setAdminId(admin.getId());
         log.setAdminName(admin.getFirstName() + " " + admin.getLastName());
@@ -586,6 +587,11 @@ public class ExcelService {
         log.setDescription("Uploaded Excel: " + fileName + " | Added: " + added + " | Duplicates: " + duplicates);
         log.setCreatedAt(LocalDateTime.now());
         log.setIpAddress("server");
+        log.setTotalRecords((long) added);
+        if (added > 0) {
+            log.setFromSerialNo(startSerial);
+            log.setToSerialNo(startSerial + added - 1);
+        }
         analyticsService.saveAndPushLog(log);
     }
 }

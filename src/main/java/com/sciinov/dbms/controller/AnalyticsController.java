@@ -2,6 +2,7 @@ package com.sciinov.dbms.controller;
 
 import com.sciinov.dbms.entity.AdminActivityLog;
 import com.sciinov.dbms.entity.ConferenceDocumentLog;
+import com.sciinov.dbms.entity.DashboardData;
 import com.sciinov.dbms.entity.DashboardUploadStats;
 import com.sciinov.dbms.security.UserDetailsImpl;
 import com.sciinov.dbms.service.AnalyticsService;
@@ -198,6 +199,26 @@ public class AnalyticsController {
         logger.info("GET logs/conference/{}", conferenceId);
         List<AdminActivityLog> logs = analyticsService.getActivityLogsByConference(conferenceId);
         return ResponseEntity.ok(Map.of("success", true, "conferenceId", conferenceId, "count", logs.size(), "data", logs));
+    }
+
+    /**
+     * GET /api/analytics/logs/{logId}/records?page=0&size=50
+     * Super Admin views the actual DB records linked to a specific activity log.
+     * Works for UPLOAD_EXCEL and DOWNLOAD_* logs (any log with a serial range).
+     */
+    @GetMapping("/logs/{logId}/records")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public ResponseEntity<?> getLogRecords(
+            @PathVariable String logId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size) {
+        logger.info("GET /api/analytics/logs/{}/records - page={} size={}", logId, page, size);
+        try {
+            Map<String, Object> result = analyticsService.getLogRecords(logId, page, size);
+            return ResponseEntity.ok(result);
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(Map.of("success", false, "message", e.getMessage()));
+        }
     }
 
     // ── CONFERENCE DOCUMENT LOGS (separate collection) ─────────────────

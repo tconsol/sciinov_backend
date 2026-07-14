@@ -1,15 +1,20 @@
 package com.sciinov.dbms.service;
 
 import com.sciinov.dbms.entity.AdminActivityLog;
+import com.sciinov.dbms.entity.DashboardData;
 import com.sciinov.dbms.entity.DashboardUploadStats;
 import com.sciinov.dbms.entity.User;
 import com.sciinov.dbms.repository.AdminActivityLogRepository;
+import com.sciinov.dbms.repository.DashboardDataRepository;
 import com.sciinov.dbms.repository.DashboardUploadStatsRepository;
 import com.sciinov.dbms.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Service
@@ -20,6 +25,9 @@ public class AnalyticsService {
 
     @Autowired
     private AdminActivityLogRepository adminActivityLogRepository;
+
+    @Autowired
+    private DashboardDataRepository dashboardDataRepository;
 
     @Autowired
     private UserRepository userRepository;
@@ -76,6 +84,49 @@ public class AnalyticsService {
         // Push to SSE — super admin gets it, admin gets their own
         logSseService.pushDataLog(saved.getAdminId(), saved);
         return saved;
+    }
+
+    // ── Log Records ───────────────────────────────────────────────────
+
+    /**
+     * Fetch the actual DashboardData records linked to an activity log.
+     * Works for UPLOAD_EXCEL and DOWNLOAD_* logs — any log with fromSerialNo/toSerialNo set.
+     */
+    public Map<String, Object> getLogRecords(String logId, int page, int size) {
+        AdminActivityLog log = adminActivityLogRepository.findById(logId)
+                .orElseThrow(() -> new RuntimeException("Log not found: " + logId));
+
+        if (log.getFromSerialNo() == null || log.getToSerialNo() == null) {
+            return Map.of(
+                "success", false,
+                "message", "This log has no record range — no records to show",
+                "logId", logId,
+                "actionType", log.getActionType().name()
+            );
+        }
+
+        PageRequest pageable = PageRequest.of(page, size, Sort.by("serialNo").ascending());
+        List<DashboardData> records = dashboardDataRepository
+                .findByConferenceIdAndDashboardMasterIdAndSerialNoBetweenAndDeletedFalse(
+                        log.getConferenceId(), log.getDashboardMasterId(),
+                        log.getFromSerialNo(), log.getToSerialNo(), pageable);
+
+        long total = dashboardDataRepository
+                .countByConferenceIdAndDashboardMasterIdAndSerialNoBetweenAndDeletedFalse(
+                        log.getConferenceId(), log.getDashboardMasterId(),
+                        log.getFromSerialNo(), log.getToSerialNo());
+
+        return Map.of(
+            "success", true,
+            "logId", logId,
+            "actionType", log.getActionType().name(),
+            "fromSerialNo", log.getFromSerialNo(),
+            "toSerialNo", log.getToSerialNo(),
+            "page", page,
+            "size", size,
+            "totalRecords", total,
+            "data", records
+        );
     }
 
     // ── Helpers ───────────────────────────────────────────────────────
